@@ -51,7 +51,11 @@ errCode SerialComm::init( const Config &cfg ) {
     dispatcher_cfg.task_priority = 5;
     errCode err = this->dispatcher_.init( dispatcher_cfg );
     if ( err != errCode::OK ) {
-        ESP_LOGE( TAG, "Failed to initialize dispatcher: %s", err_to_str(err) );
+        ESP_LOGE( 
+            TAG, 
+            "Failed to initialize dispatcher: %s", 
+            err_to_str(err) 
+        );
         this->cleanup_resources();
         return err;
     }
@@ -60,7 +64,11 @@ errCode SerialComm::init( const Config &cfg ) {
     if ( this->cfg_.enable_inter_byte_timeout ) {
         err = this->setup_interbyte_watchdog();
         if ( err != errCode::OK ) {
-            ESP_LOGE( TAG, "Failed to setup inter-byte timeout watchdog: %s", err_to_str(err) );
+            ESP_LOGE( 
+                TAG, 
+                "Failed to setup inter-byte timeout watchdog: %s", 
+                err_to_str(err) 
+            );
             this->cleanup_resources();
             return err;
         }
@@ -72,7 +80,11 @@ errCode SerialComm::init( const Config &cfg ) {
         this
     );
     if ( err != errCode::OK ) {
-        ESP_LOGE( TAG, "Failed to set transport RX callback: %s", err_to_str(err) );
+        ESP_LOGE( 
+            TAG, 
+            "Failed to set transport RX callback: %s", 
+            err_to_str(err) 
+        );
         this->cleanup_resources();
         return err;
     }
@@ -101,7 +113,7 @@ errCode SerialComm::start() {
         return err;
     }
     // Start transport
-    errCode err = this->transport_->start();
+    err = this->transport_->start();
     if (err != errCode::OK) {
         ESP_LOGE( TAG, "Failed to start transport: %s", err_to_str(err) );
         this->dispatcher_.stop();
@@ -251,6 +263,11 @@ void SerialComm::process_rx_data( const uint8_t* data, size_t len ) {
     SerialCommProtoPacket packet;
     xSemaphoreTake( this->parser_mutex_, portMAX_DELAY );
     bool valid_packet = this->parser_.parse_buffer( data, len, packet );
+    // Reset the Parser if it is a valid packet 
+    if ( valid_packet ) {
+        this->interbyte_watchdog_->stop();
+        this->parser_.reset();
+    }
     xSemaphoreGive( this->parser_mutex_ );
 
     // Dispatch packet if valid

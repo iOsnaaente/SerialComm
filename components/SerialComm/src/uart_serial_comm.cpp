@@ -15,15 +15,18 @@ static const char* TAG = "UART_TRANSPORT";
 
 UARTTransport::UARTTransport( const HardwareConfig& hw_cfg ) 
     :   hw_cfg_(hw_cfg),
-        state_(State::UNINITIALIZED),
+    uart_mutex_(nullptr),
+    state_mutex_(nullptr),
         uart_queue_(nullptr),
         uart_task_(nullptr),
-        rx_callback_(nullptr),
         tx_done_callback_(nullptr),
         event_callback_(nullptr),
+    rx_callback_(nullptr),
+    event_ctx_(nullptr),
         rx_ctx_(nullptr),
         tx_ctx_(nullptr),
-        event_ctx_(nullptr)
+    cfg_(),
+    state_(State::UNINITIALIZED)
 { }
 
 

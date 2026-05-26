@@ -13,6 +13,7 @@
 #include "serial_comm_transport.h"
 #include "serial_comm_config.h"
 #include "serial_comm_utils.h"
+#include "serial_comm.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"

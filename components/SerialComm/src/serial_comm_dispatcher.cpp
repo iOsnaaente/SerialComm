@@ -137,7 +137,7 @@ errCode SerialCommDispatcher::enqueue(
             "RX queue full. Dropped command: 0x%02X",
             packet.header.command 
         );
-        return errCode::ERR_QUEUE_FULL;
+        return errCode::ERR_BUFFER_FULL;
     }
 
     // Update statistics

@@ -47,7 +47,7 @@ class ISerialCommTransport{
 
         /* TRANSPORT CONFIG */
         struct Config{
-            uint32_t baudrate           = 115200;
+            uint32_t baudrate           = 921600;
             size_t rx_buffer_size       = 1024;
             size_t tx_buffer_size       = 1024;
             bool auto_interbyte_timeout = true;

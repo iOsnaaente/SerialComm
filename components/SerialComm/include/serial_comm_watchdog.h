@@ -19,8 +19,6 @@
 #include <string.h>
 
 
-using namespace SerialCommUtils;
-
 /**
  * @brief   Serial communication middleware watchdog timer
  * @details This class implements a watchdog timer using the ESP32's general 

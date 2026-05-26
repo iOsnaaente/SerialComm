@@ -13,7 +13,7 @@ menu "Serial Communication Middleware"
 
     config SERIAL_COMM_UART_BAUDRATE
         int "UART Baudrate"
-        default 115200
+        default 921600
         help
             UART communication baudrate.
 
