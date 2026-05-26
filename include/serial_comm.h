@@ -183,6 +183,9 @@ class SerialComm {
     private:
         /**
          * @brief   Static RX callback from transport
+         * @param   ctx User context (pointer to SerialComm instance)
+         * @param   data Received data buffer
+         * @param   len Length of received data
          */
         static void transport_rx_callback(
             void* ctx,
@@ -192,6 +195,8 @@ class SerialComm {
 
         /**
          * @brief   Process incoming RX data
+         * @param   data Received data buffer
+         * @param   len Length of received data
          */
         void process_rx_data( const uint8_t* data, size_t len );
 

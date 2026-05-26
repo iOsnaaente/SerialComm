@@ -1,5 +1,6 @@
 /**
- * @brief Serial communication protocol, structs, types and constants
+ * @file    serial_comm_messages.h
+ * @brief   Serial communication protocol, structs, types and constants
  */
 
 #pragma once 
@@ -7,26 +8,77 @@
 #include <stdint.h>
 #include <stddef.h>
 
-constexpr uint8_t HEADER_0 = 0xAA;
-constexpr uint8_t HEADER_1 = 0x55;
-constexpr uint8_t HEADER_2 = 0xAA;
-
-constexpr uint8_t PROTOCOL_VERSION = 0x01;
-constexpr size_t MAX_PAYLOAD_SIZE = 256;
-
-enum class Command : uint8_t {
-    READ_JOINTS   = 0x01,
-    WRITE_JOINTS  = 0x02,
+/**
+ * @brief   Serial communication protocol commands
+ * @note    To add a new command, add it before the REPLY command and 
+ *          ensure the REPLY_MASK is set correctly
+ */
+enum class SerialCommCommand : uint8_t {
+    UNDEFINED     = 0x00,
+    READ          = 0x01,
+    WRITE         = 0x02,
     PING          = 0x03,
     READ_UTILITY  = 0x04,
     WRITE_UTILITY = 0x05,
-    SMOOTH_MOVE   = 0x06
 };
 
-struct Packet {
-    uint8_t version;
-    Command command;
-    uint16_t payload_len;
-    uint8_t payload[MAX_PAYLOAD_SIZE];
-    uint16_t crc;
-};
+
+/**
+ * @brief       Serial communication protocol commands to string conversion
+ * @details     Useful for logs/debugging.
+ * @param[in]   cmd SerialCommCommand enum
+ * @return      const char* SerialCommCommand string
+ */
+const char* serial_command_to_str(SerialCommCommand cmd){
+    switch (cmd) {
+        case SerialCommCommand::UNDEFINED:
+            return "UNDEFINED";
+        case SerialCommCommand::READ:
+            return "READ";
+        case SerialCommCommand::WRITE:
+            return "WRITE";
+        case SerialCommCommand::PING:
+            return "PING";
+        case SerialCommCommand::READ_UTILITY:
+            return "READ_UTILITY";
+        case SerialCommCommand::WRITE_UTILITY:
+            return "WRITE_UTILITY";
+        case SerialCommCommand::SMOOTH_MOVE:
+            return "SMOOTH_MOVE";
+        default:
+            return "UNKNOWN_COMMAND";
+    }
+}
+
+/**
+ * @brief   Command flag bit mask
+ */
+#define SERIAL_COMM_CMD_REPLY_MASK    0x80
+
+
+/**
+ * @brief   Commands Helpers 
+ */
+static inline bool is_reply( SerialCommCommand cmd ) {
+    return ( static_cast<uint8_t>(cmd) & SERIAL_COMM_CMD_REPLY_MASK ) != 0;
+}
+
+static inline bool is_request( SerialCommCommand cmd ) {
+    return !is_reply(cmd);
+}
+
+
+static inline SerialCommCommand make_reply( SerialCommCommand cmd ) {
+    return static_cast<SerialCommCommand>( 
+        static_cast<uint8_t>(cmd) | 
+        SERIAL_COMM_CMD_REPLY_MASK
+    );
+}
+
+
+static inline SerialCommCommand make_request( SerialCommCommand cmd ) {
+    return static_cast<SerialCommCommand>(
+        static_cast<uint8_t>(cmd) &
+        ~SERIAL_COMM_CMD_REPLY_MASK
+    );
+}

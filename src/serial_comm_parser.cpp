@@ -29,7 +29,7 @@ bool SerialCommParser::parse_byte(
             if (byte == SERIAL_COMM_HEADER_1) {
                 this->state_ = State::WAIT_HEADER_2;
             } else {
-                reset();
+                this->reset();
             }
             break;
         }
@@ -37,17 +37,34 @@ bool SerialCommParser::parse_byte(
         // Header 2
         case State::WAIT_HEADER_2: {
             if (byte == SERIAL_COMM_HEADER_2) {
-                synchronized_ = true;
-                this->state_ = State::READ_VERSION;
+                this->state_ = State::GET_SEQ_ID_L;
             } else {
-                reset();
+                this->reset();
             }
+            break;
+        }
+
+        case State::GET_SEQ_ID_L: {
+            packet_.header.seq_id = byte;
+            this->state_ = State::GET_SEQ_ID_H;
+            break;
+        }
+        
+        case State::GET_SEQ_ID_H: {
+            packet_.header.seq_id |= (byte << 8);
+            this->state_ = State::READ_VERSION;
             break;
         }
 
         // READ VERSION
         case State::READ_VERSION: {
             packet_.header.version = byte;
+            
+            if ( packet_.header.version != SERIAL_COMM_PROTOCOL_VER1 ) {
+                this->reset();
+                break;
+            }
+
             this->state_ = State::READ_COMMAND;
             break;
         }
@@ -70,15 +87,22 @@ bool SerialCommParser::parse_byte(
         // READ LENGTH HIGH BYTE
         case State::READ_LENGTH_H: {
             packet_.header.payload_len |= (byte << 8);
+
             // VALIDATE PAYLOAD SIZE
-            if ( packet_.header.payload_len > SERIAL_COMM_MAX_PAYLOAD_V1 ) {
-                reset();
+            size_t max_payload_size = 
+                packet_.header.version == SERIAL_COMM_PROTOCOL_VER1 ? 
+                    SERIAL_COMM_MAX_PAYLOAD_V1 : 
+                    SERIAL_COMM_MAX_PAYLOAD_V2;
+            if ( packet_.header.payload_len > max_payload_size ) {
+                this->reset();
                 break;
             }
+            
             // NO PAYLOAD
             if ( packet_.header.payload_len == 0 ) {
                 this->state_ =
                     State::READ_CRC_L;
+
             } else {
                 payload_index_ = 0;
                 this->state_ = State::READ_PAYLOAD;
@@ -111,23 +135,21 @@ bool SerialCommParser::parse_byte(
             if ( SerialCommProtocol::validate_packet(packet_)) {
                 out_packet = packet_;
                 this->state_ = State::PACKET_READY;
-                reset();
+                this->reset();
                 return true;
             }
-            reset();
+            this->reset();
             break;
         }
 
         // PACKET READY
         case State::PACKET_READY: {
-            reset();
+            this->reset();
             break;
         }
 
-        // ERROR
-        case State::ERROR:
         default: {
-            reset();
+            this->reset();
             break;
         }
     }
@@ -135,14 +157,20 @@ bool SerialCommParser::parse_byte(
 }
 
 
-bool SerialCommParser::parse_buffer(
+bool SerialCommParser::parse_next_packet(
     const uint8_t* data,
     size_t len,
+    size_t &consumed_bytes,
     SerialCommProtoPacket& out_packet
 ) {
+    // Verify input parameters
     if (data == nullptr)
         return false;
+
+    // Inicialize output parameters
+    consumed_bytes = 0;
     for (size_t i = 0; i < len; i++) {
+        consumed_bytes++;
         if ( parse_byte( data[i], out_packet ) ) {
             return true;
         }
@@ -153,10 +181,10 @@ bool SerialCommParser::parse_buffer(
 
 void SerialCommParser::reset() {
     this->state_ = State::WAIT_HEADER_0;
-    payload_index_ = 0;
-    crc_l_ = 0;
-    synchronized_ = false;
-    SerialCommProtocol::clear_packet( packet_ );
+    this->packet_.header.payload_len = 0;
+    this->payload_index_ = 0;
+    this->packet_.crc = 0;
+    this->crc_l_ = 0;
 }
 
 
@@ -165,18 +193,13 @@ SerialCommParser::State SerialCommParser::state() const {
 }
 
 
-bool SerialCommParser::synchronized() const {
-    return synchronized_;
-}
-
-
 size_t SerialCommParser::payload_index() const {
-    return payload_index_;
+    return this->payload_index_;
 }
 
 
 uint16_t SerialCommParser::expected_payload_size() const {
-    return packet_.header.payload_len;
+    return this->packet_.header.payload_len;
 }
 
 
@@ -185,6 +208,8 @@ const char* SerialCommParser::state_to_str( State state ) {
         case State::WAIT_HEADER_0:  return "WAIT_HEADER_0";
         case State::WAIT_HEADER_1:  return "WAIT_HEADER_1";
         case State::WAIT_HEADER_2:  return "WAIT_HEADER_2";
+        case State::GET_SEQ_ID_L:   return "GET_SEQ_ID_L";
+        case State::GET_SEQ_ID_H:   return "GET_SEQ_ID_H";
         case State::READ_VERSION:   return "READ_VERSION";
         case State::READ_COMMAND:   return "READ_COMMAND";
         case State::READ_LENGTH_L:  return "READ_LENGTH_L";

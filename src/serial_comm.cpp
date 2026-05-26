@@ -230,7 +230,8 @@ void SerialComm::transport_rx_callback(
     const uint8_t* data, 
     size_t len
 ) {
-    if (ctx == nullptr){
+    // Verify context
+    if ( ctx == nullptr ){
         return;
     }
     auto* self = static_cast<SerialComm*>(ctx);
@@ -239,6 +240,7 @@ void SerialComm::transport_rx_callback(
 
 
 void SerialComm::process_rx_data( const uint8_t* data, size_t len ) {
+    // Verify data pointer
     if (data == nullptr){
         ESP_LOGE( TAG, "Received null data pointer" );
         return;
@@ -247,17 +249,33 @@ void SerialComm::process_rx_data( const uint8_t* data, size_t len ) {
     if ( this->interbyte_watchdog_ != nullptr ) {
         this->interbyte_watchdog_->kick();
     }
-    // Parse Stream 
-    SerialCommProtoPacket packet;
-    xSemaphoreTake( this->parser_mutex_, portMAX_DELAY );
-    bool valid_packet = this->parser_.parse_buffer( data, len, packet );
-    xSemaphoreGive( this->parser_mutex_ );
+    // Parse Stream with multiples packets support
+    size_t offset_packet = 0;
+    while ( offset_packet < len ){
+        SerialCommProtoPacket packet;
+        size_t consumed_bytes = 0;
+        xSemaphoreTake( this->parser_mutex_, portMAX_DELAY );
+        bool valid_packet = this->parser_.parse_next_packet( 
+            &data[offset_packet], 
+            len - offset_packet,
+            consumed_bytes, 
+            packet 
+        );
+        xSemaphoreGive( this->parser_mutex_ );
 
-    // Dispatch packet if valid
-    if ( valid_packet ) {
-        errCode err = this->dispatcher_.enqueue( packet );
-        if ( err != errCode::OK ) {
-            ESP_LOGE( TAG, "Failed to enqueue packet" );
+        // Safety check to avoid infinite loop on parser error
+        if ( consumed_bytes == 0 ) {
+            ESP_LOGE( TAG, "Parser failed to consume bytes" );
+            break;
+        }
+        offset_packet += consumed_bytes;
+    
+        // Dispatch packet if valid
+        if ( valid_packet ) {
+            errCode err = this->dispatcher_.enqueue( packet );
+            if ( err != errCode::OK ) {
+                ESP_LOGE( TAG, "Failed to enqueue packet" );
+            }
         }
     }
 }

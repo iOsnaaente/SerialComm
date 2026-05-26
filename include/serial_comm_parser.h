@@ -34,6 +34,8 @@ public:
         WAIT_HEADER_0 = 0,
         WAIT_HEADER_1,
         WAIT_HEADER_2,
+        GET_SEQ_ID_L,
+        GET_SEQ_ID_H,
         READ_VERSION,
         READ_COMMAND,
         READ_LENGTH_L,
@@ -54,8 +56,6 @@ private:
     uint16_t payload_index_;
     /** Temporary CRC low byte  */
     uint8_t crc_l_;
-    /** Parser synchronization state */
-    bool synchronized_;
 
 public:
     /**
@@ -64,9 +64,7 @@ public:
     SerialCommParser() :
         state_( State::WAIT_HEADER_0 ),
         payload_index_(0),
-        crc_l_(0),
-        synchronized_(false)
-    { 
+        crc_l_(0) { 
         SerialCommProtocol::clear_packet( packet_ );
     }
 
@@ -92,13 +90,15 @@ public:
      * @brief       Parse a byte stream buffer
      * @param[in]   data Stream buffer
      * @param[in]   len Buffer length
+     * @param[out]  consumed_bytes Number of bytes consumed from buffer
      * @param[out]  out_packet Parsed packet
      * @return      True Packet completed
      * @return      False No valid packet found
      */
-    bool parse_buffer(
+    bool parse_next_packet(
         const uint8_t* data,
         size_t len,
+        size_t &consumed_bytes,
         SerialCommProtoPacket& out_packet
     );
 
@@ -117,12 +117,6 @@ public:
      */
     State state() const;
 
-    /**
-     * @brief       Check if parser is synchronized
-     * @return      True Parser synchronized with stream
-     * @return      False Parser waiting synchronization
-     */
-    bool synchronized() const;
 
     /**
      * @brief       Get current payload index

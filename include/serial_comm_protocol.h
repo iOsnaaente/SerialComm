@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "serial_comm_messages.h"
 #include "serial_comm_utils.h"
 
 #include <stdint.h>
@@ -22,106 +23,101 @@
 /**
  * @brief Protocol header bytes
  */
-#define SERIAL_COMM_HEADER_0        0xAA
-#define SERIAL_COMM_HEADER_1        0x55
-#define SERIAL_COMM_HEADER_2        0xAA
+constexpr uint8_t SERIAL_COMM_HEADER_0          = 0xAA;
+constexpr uint8_t SERIAL_COMM_HEADER_1          = 0x55;
+constexpr uint8_t SERIAL_COMM_HEADER_2          = 0xAA;
+
+/**
+ * @brief Protocol field sizes in bytes
+ */
+constexpr uint8_t SERIAL_COMM_HEADER_SIZE       = 3;
+constexpr uint8_t SERIAL_COMM_SEQ_SIZE          = 2;
+constexpr uint8_t SERIAL_COMM_PROTOCOL_VER_SIZE = 1;
+constexpr uint8_t SERIAL_COMM_SRC_SIZE          = 1;
+constexpr uint8_t SERIAL_COMM_DST_SIZE          = 1;
+constexpr uint8_t SERIAL_COMM_FLAG_SIZE         = 1;
+constexpr uint8_t SERIAL_COMM_COMMAND_SIZE      = 1;
+constexpr uint8_t SERIAL_COMM_LENGTH_SIZE       = 2;
+constexpr uint8_t SERIAL_COMM_CRC_SIZE          = 2;
 
 /**
  * @brief Current protocol version
  */
-#define SERIAL_COMM_PROTOCOL_VER1    0x01
-#define SERIAL_COMM_PROTOCOL_VER2    0x02
+constexpr uint8_t SERIAL_COMM_PROTOCOL_VER1     = 0x01;
+constexpr uint8_t SERIAL_COMM_PROTOCOL_VER2     = 0x02;
 
 /**
  * @brief Maximum payload size
  */
-#define SERIAL_COMM_MAX_PAYLOAD_V1     512
-#define SERIAL_COMM_MAX_PAYLOAD_V2     1024
-
-#define SERIAL_COMM_HEADER_SIZE         3
-#define SERIAL_COMM_PROTOCOL_VER_SIZE   1
-#define SERIAL_COMM_SRC_SIZE            1
-#define SERIAL_COMM_DST_SIZE            1
-#define SERIAL_COMM_SEQ_SIZE            2
-#define SERIAL_COMM_FLAG_SIZE           1
-#define SERIAL_COMM_COMMAND_SIZE        1
-#define SERIAL_COMM_LENGTH_SIZE         2
-#define SERIAL_COMM_CRC_SIZE            2
+constexpr size_t SERIAL_COMM_MAX_PAYLOAD_V1     = 512;
+constexpr size_t SERIAL_COMM_MAX_PAYLOAD_V2     = 1024;
 
 
 /**
  * @brief Maximum packet size for V1
  * HEADER(3)
+ * SEQ_ID(2)
  * VERSION(1)
  * COMMAND(1)
  * LENGTH(2)
  * PAYLOAD(1024)
  * CRC16(2)
  */
-#define SERIAL_COMM_MAX_PACKET_SIZE_V1 \
+constexpr size_t SERIAL_COMM_MAX_PACKET_SIZE_V1 =  \
     SERIAL_COMM_HEADER_SIZE + \
+    SERIAL_COMM_SEQ_SIZE + \
     SERIAL_COMM_PROTOCOL_VER_SIZE + \
     SERIAL_COMM_COMMAND_SIZE + \
     SERIAL_COMM_LENGTH_SIZE + \
     SERIAL_COMM_MAX_PAYLOAD_V1 + \
-    SERIAL_COMM_CRC_SIZE
+    SERIAL_COMM_CRC_SIZE;
 
 
 /**
  * @brief Maximum packet size for V2
  * HEADER(3)
+ * SEQ_ID(2)
  * VERSION(1)
  * SRC(1)
  * DST(1)
- * SEQ(2)
  * FLAG(1)
  * COMMAND(1)
  * LENGTH(2)
  * PAYLOAD(1024)
  * CRC16(2)
  */
-#define SERIAL_COMM_MAX_PACKET_SIZE_V2 \
+constexpr size_t SERIAL_COMM_MAX_PACKET_SIZE_V2 =  \
     SERIAL_COMM_HEADER_SIZE + \
+    SERIAL_COMM_SEQ_SIZE + \
     SERIAL_COMM_PROTOCOL_VER_SIZE + \
     SERIAL_COMM_SRC_SIZE + \
     SERIAL_COMM_DST_SIZE + \
-    SERIAL_COMM_SEQ_SIZE + \
     SERIAL_COMM_FLAG_SIZE + \
     SERIAL_COMM_COMMAND_SIZE + \
     SERIAL_COMM_LENGTH_SIZE + \
     SERIAL_COMM_MAX_PAYLOAD_V2 + \
-    SERIAL_COMM_CRC_SIZE
-
-/**
- * @brief Protocol command identifiers
- */
-enum class SerialCommProtoCommand : uint8_t {
-    UNKNOWN             = 0x00,
-    PING                = 0x01,
-    READ                = 0x02,
-    WRITE               = 0x03,
-    REPLY               = 0x04,
-    ERROR               = 0x05,
-    SYNC_WRITE          = 0x06,
-    SYNC_READ           = 0x07,
-    EVENT               = 0x08,
-    ACK                 = 0x09,
-    NACK                = 0x0A
-};
+    SERIAL_COMM_CRC_SIZE;
 
 
 /**
  * @brief   Protocol packet structure
  * @param   header Packet header containing metadata
+ * @param   seq_id Packet sequence identifier: 
+ *              - For tracking and matching requests/replies
  * @param   version Protocol version
  * @param   command Command identifier
  * @param   payload_len Packet payload length 
  */
 struct SerialCommProtoHeader {
-    uint8_t header[3];
-    uint8_t version;
-    SerialCommProtoCommand command;
-    uint16_t payload_len;
+    uint8_t header[3] = {
+        SERIAL_COMM_HEADER_0,
+        SERIAL_COMM_HEADER_1,
+        SERIAL_COMM_HEADER_2
+    };
+    uint16_t seq_id = 0;
+    uint8_t version = SERIAL_COMM_PROTOCOL_VER1;
+    SerialCommCommand command = SerialCommCommand::UNDEFINED;
+    uint16_t payload_len = 0;
 };
 
 
@@ -134,7 +130,7 @@ struct SerialCommProtoHeader {
  */
 struct SerialCommProtoPacket {
     SerialCommProtoHeader header;
-    uint8_t payload[SERIAL_COMM_MAX_PAYLOAD_V1 ];
+    uint8_t payload[SERIAL_COMM_MAX_PAYLOAD_V2 ] = { 0 };
     uint16_t crc = 0;
 };
 
@@ -221,14 +217,4 @@ public:
         SerialCommProtoPacket& packet
     );
 
-
-    /**
-     * @brief       Convert command enum to string
-     * @details     Useful for logs/debugging.
-     * @param[in]   cmd Command enum
-     * @return      Command string
-     */
-    static const char* command_to_str(
-        SerialCommProtoCommand cmd
-    );
 };

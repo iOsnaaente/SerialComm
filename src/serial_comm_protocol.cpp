@@ -29,6 +29,10 @@ size_t SerialCommProtocol::encode(
     out_buffer[index++] = SERIAL_COMM_HEADER_1;
     out_buffer[index++] = SERIAL_COMM_HEADER_2;
     
+    // SEQ_ID 
+    out_buffer[index++] = (packet.header.seq_id & 0xFF);
+    out_buffer[index++] = ((packet.header.seq_id >> 8) & 0xFF);
+
     // VERSION
     out_buffer[index++] = packet.header.version;
     
@@ -98,12 +102,18 @@ int32_t SerialCommProtocol::decode(
     }
     size_t index = 3;
 
+    // SEQ_ID
+    out_packet.header.seq_id =
+        raw_data[index] |
+        (raw_data[index + 1] << 8);
+    index += 2;
+
     // VERSION
     out_packet.header.version = raw_data[index++];
 
     // COMMAND
     out_packet.header.command =
-        static_cast<SerialCommProtoCommand>(
+        static_cast<SerialCommCommand>(
             raw_data[index++]
         );
 
@@ -236,31 +246,5 @@ size_t SerialCommProtocol::packet_size(
 void SerialCommProtocol::clear_packet( SerialCommProtoPacket& packet ) {
     memset( &packet, 0, sizeof(SerialCommProtoPacket) );
     packet.header.version = SERIAL_COMM_PROTOCOL_VER1;
-    packet.header.command = SerialCommProtoCommand::UNKNOWN;
-}
-
-
-const char* SerialCommProtocol::command_to_str(
-    SerialCommProtoCommand cmd
-) {
-    switch (cmd) {
-        case SerialCommProtoCommand::PING:
-            return "PING";
-        case SerialCommProtoCommand::READ:
-            return "READ";
-        case SerialCommProtoCommand::WRITE:
-            return "WRITE";
-        case SerialCommProtoCommand::REPLY:
-            return "REPLY";
-        case SerialCommProtoCommand::ERROR:
-            return "ERROR";
-        case SerialCommProtoCommand::EVENT:
-            return "EVENT";
-        case SerialCommProtoCommand::ACK:
-            return "ACK";
-        case SerialCommProtoCommand::NACK:
-            return "NACK";
-        default:
-            return "UNKNOWN";
-    }
+    packet.header.command = SerialCommCommand::UNKNOWN;
 }
