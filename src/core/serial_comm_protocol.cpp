@@ -29,6 +29,10 @@ size_t SerialCommProtocol::encode(
     out_buffer[index++] = SERIAL_COMM_HEADER_1;
     out_buffer[index++] = SERIAL_COMM_HEADER_2;
     
+    // SEQ_ID 
+    out_buffer[index++] = (packet.header.seq_id & 0xFF);
+    out_buffer[index++] = ((packet.header.seq_id >> 8) & 0xFF);
+
     // VERSION
     out_buffer[index++] = packet.header.version;
     
@@ -71,14 +75,15 @@ int32_t SerialCommProtocol::decode(
         return errCode::ERR_NULL_POINTER;
     }
     
-    // Check de maximum acceptable packet size
-    if ( raw_len > SERIAL_COMM_MAX_PACKET_SIZE_V1 ) {
+    // Check de maximum acceptable packet size (accept V2 max as upper bound)
+    if ( raw_len > SERIAL_COMM_MAX_PACKET_SIZE_V2 ) {
         return errCode::ERR_OVERFLOW;
     }
 
     // Check minimum size for a valid packet 
     size_t min_packet_size =
         SERIAL_COMM_HEADER_SIZE +
+        SERIAL_COMM_SEQ_SIZE +
         SERIAL_COMM_PROTOCOL_VER_SIZE +
         SERIAL_COMM_COMMAND_SIZE +
         SERIAL_COMM_LENGTH_SIZE +
@@ -98,12 +103,18 @@ int32_t SerialCommProtocol::decode(
     }
     size_t index = 3;
 
+    // SEQ_ID
+    out_packet.header.seq_id =
+        raw_data[index] |
+        (raw_data[index + 1] << 8);
+    index += 2;
+
     // VERSION
     out_packet.header.version = raw_data[index++];
 
     // COMMAND
     out_packet.header.command =
-        static_cast<SerialCommProtoCommand>(
+        static_cast<SerialCommCommand>(
             raw_data[index++]
         );
 
@@ -114,11 +125,12 @@ int32_t SerialCommProtocol::decode(
     index += 2;
 
     // PAYLOAD SIZE VALIDATION
-    if ( out_packet.header.payload_len > SERIAL_COMM_MAX_PAYLOAD_V1 ) {
+    if ( out_packet.header.payload_len > SERIAL_COMM_MAX_PAYLOAD ) {
         return errCode::ERR_OVERFLOW;
     }
     size_t expected_size =
         SERIAL_COMM_HEADER_SIZE +
+        SERIAL_COMM_SEQ_SIZE +
         SERIAL_COMM_PROTOCOL_VER_SIZE +
         SERIAL_COMM_COMMAND_SIZE +
         SERIAL_COMM_LENGTH_SIZE +
@@ -168,37 +180,30 @@ uint16_t SerialCommProtocol::compute_crc16(
 bool SerialCommProtocol::validate_crc(
     const SerialCommProtoPacket& packet
 ) {
-    uint8_t temp_buffer[ SERIAL_COMM_MAX_PACKET_SIZE_V1 ];
+    uint8_t temp_buffer[ SERIAL_COMM_MAX_PACKET_SIZE_V2 ];
     size_t index = 0;
+
+    // SEQ_ID (CRC excludes only the preamble header and the CRC field)
+    temp_buffer[index++] = (packet.header.seq_id & 0xFF);
+    temp_buffer[index++] = ((packet.header.seq_id >> 8) & 0xFF);
 
     // VERSION
     temp_buffer[index++] = packet.header.version;
 
     // COMMAND
-    temp_buffer[index++] =
-        static_cast<uint8_t>(
-            packet.header.command
-        );
+    temp_buffer[index++] = static_cast<uint8_t>(packet.header.command);
 
     // PAYLOAD LENGTH
     temp_buffer[index++] = (packet.header.payload_len & 0xFF);
     temp_buffer[index++] = ((packet.header.payload_len >> 8) & 0xFF);
 
     // PAYLOAD
-    memcpy(
-        &temp_buffer[index],
-        packet.payload,
-        packet.header.payload_len
-    );
+    memcpy(&temp_buffer[index], packet.payload, packet.header.payload_len);
     index += packet.header.payload_len;
 
     // COMPUTE CRC16 TO COMPARE 
-    uint16_t computed_crc =
-        compute_crc16(
-            temp_buffer,
-            index
-        );
-    return ( computed_crc == packet.crc );
+    uint16_t computed_crc = compute_crc16(temp_buffer, index);
+    return (computed_crc == packet.crc );
 }
 
 
@@ -210,7 +215,7 @@ bool SerialCommProtocol::validate_packet(
         return false;
     }
     // Validate payload length
-    if ( packet.header.payload_len > SERIAL_COMM_MAX_PAYLOAD_V1 ) {
+    if ( packet.header.payload_len > SERIAL_COMM_MAX_PAYLOAD ) {
         return false;
     }
     // Validate CRC
@@ -226,6 +231,7 @@ size_t SerialCommProtocol::packet_size(
 ) {
     return
         SERIAL_COMM_HEADER_SIZE +
+        SERIAL_COMM_SEQ_SIZE +
         SERIAL_COMM_PROTOCOL_VER_SIZE +
         SERIAL_COMM_COMMAND_SIZE +
         SERIAL_COMM_LENGTH_SIZE +
@@ -234,33 +240,7 @@ size_t SerialCommProtocol::packet_size(
 }
 
 void SerialCommProtocol::clear_packet( SerialCommProtoPacket& packet ) {
-    memset( &packet, 0, sizeof(SerialCommProtoPacket) );
+    memset(&packet, 0, sizeof(SerialCommProtoPacket));
     packet.header.version = SERIAL_COMM_PROTOCOL_VER1;
-    packet.header.command = SerialCommProtoCommand::UNKNOWN;
-}
-
-
-const char* SerialCommProtocol::command_to_str(
-    SerialCommProtoCommand cmd
-) {
-    switch (cmd) {
-        case SerialCommProtoCommand::PING:
-            return "PING";
-        case SerialCommProtoCommand::READ:
-            return "READ";
-        case SerialCommProtoCommand::WRITE:
-            return "WRITE";
-        case SerialCommProtoCommand::REPLY:
-            return "REPLY";
-        case SerialCommProtoCommand::ERROR:
-            return "ERROR";
-        case SerialCommProtoCommand::EVENT:
-            return "EVENT";
-        case SerialCommProtoCommand::ACK:
-            return "ACK";
-        case SerialCommProtoCommand::NACK:
-            return "NACK";
-        default:
-            return "UNKNOWN";
-    }
+    packet.header.command = SerialCommCommand::UNDEFINED;
 }

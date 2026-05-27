@@ -13,17 +13,20 @@ using namespace SerialCommResult_Codes;
 static const char* TAG = "UART_TRANSPORT";
 
 
-UARTTransport::UARTTransport( const HardwareConfig& hw_cfg ) 
-    :   hw_cfg_(hw_cfg),
-        state_(State::UNINITIALIZED),
-        uart_queue_(nullptr),
-        uart_task_(nullptr),
-        rx_callback_(nullptr),
-        tx_done_callback_(nullptr),
-        event_callback_(nullptr),
-        rx_ctx_(nullptr),
-        tx_ctx_(nullptr),
-        event_ctx_(nullptr)
+UARTTransport::UARTTransport( const HardwareConfig& hw_cfg ) :   
+    hw_cfg_(hw_cfg),
+    uart_mutex_(nullptr),
+    state_mutex_(nullptr),
+    uart_queue_(nullptr),
+    uart_task_(nullptr),
+    tx_done_callback_(nullptr),
+    event_callback_(nullptr),
+    rx_callback_(nullptr),
+    event_ctx_(nullptr),
+    rx_ctx_(nullptr),
+    tx_ctx_(nullptr),
+    cfg_{},
+    state_(State::UNINITIALIZED)
 { }
 
 
@@ -46,7 +49,7 @@ errCode UARTTransport::init( const Config& cfg ) {
         (uart_port_t)hw_cfg_.uart_port,
         cfg.rx_buffer_size,
         cfg.tx_buffer_size,
-        32,
+        SerialCommConfig::UART_EVENT_QUEUE_SIZE,
         &uart_queue_,
         0
     );
@@ -100,15 +103,32 @@ errCode UARTTransport::start() {
         return errCode::ERR_INVALID_STATE;
     }
 
-    xTaskCreatePinnedToCore(
-        uart_event_task,
-        "uart_event_task",
-        4096,
-        this,
-        5,
-        &uart_task_,
-        1
-    );
+    // Check if the Task have Core afinity enabled
+    BaseType_t task_result;
+    if ( SerialCommConfig::UART_USE_TASK_CORE_AFINITY ){
+        task_result = xTaskCreatePinnedToCore(
+            uart_event_task,
+            "uart_event_task",
+            SerialCommConfig::UART_TASK_STACK_SIZE,
+            this,
+            SerialCommConfig::UART_TASK_PRIORITY,
+            &uart_task_,
+            SerialCommConfig::UART_TASK_CORE
+        );
+    } else {
+        task_result = xTaskCreate(
+            uart_event_task,
+            "uart_event_task",
+            SerialCommConfig::UART_TASK_STACK_SIZE,
+            this,
+            SerialCommConfig::UART_TASK_PRIORITY,
+            &uart_task_
+        );
+    }
+    if ( task_result != pdPASS ) {
+        ESP_LOGE( TAG, "Failed to create UART event task" );
+        return errCode::ERR_FAIL;
+    }
 
     state_ = State::RUNNING;
     ESP_LOGI( TAG, "UART started" );

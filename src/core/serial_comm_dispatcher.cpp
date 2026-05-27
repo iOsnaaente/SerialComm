@@ -137,7 +137,7 @@ errCode SerialCommDispatcher::enqueue(
             "RX queue full. Dropped command: 0x%02X",
             packet.header.command 
         );
-        return errCode::ERR_QUEUE_FULL;
+        return errCode::ERR_BUFFER_FULL;
     }
 
     // Update statistics
@@ -151,7 +151,7 @@ errCode SerialCommDispatcher::enqueue(
 
 
 errCode SerialCommDispatcher::register_callback(
-    SerialCommProtoCommand command,
+    SerialCommCommand command,
     packet_callback_t callback,
     void* ctx
 ) {
@@ -174,7 +174,7 @@ errCode SerialCommDispatcher::register_callback(
 
 
 errCode SerialCommDispatcher::unregister_callback(
-    SerialCommProtoCommand command
+    SerialCommCommand command
 ) {
     uint8_t cmd = static_cast<uint8_t>( command );
     xSemaphoreTake( this->callback_mutex_, portMAX_DELAY );
@@ -205,7 +205,7 @@ void SerialCommDispatcher::dispatcher_task_entry( void* args ) {
 
 
 void SerialCommDispatcher::dispatcher_task() {
-    SerialCommProtoPacket packet;
+    static SerialCommProtoPacket packet;
     while ( true ) {
         if ( xQueueReceive( this->rx_queue_, &packet, portMAX_DELAY ) == pdTRUE ) {
             dispatch_packet( packet );

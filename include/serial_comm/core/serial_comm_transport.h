@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "serial_comm_config.h"
 #include "serial_comm_utils.h"
 
 #include <stdint.h>
@@ -47,9 +48,9 @@ class ISerialCommTransport{
 
         /* TRANSPORT CONFIG */
         struct Config{
-            uint32_t baudrate           = 115200;
-            size_t rx_buffer_size       = 1024;
-            size_t tx_buffer_size       = 1024;
+            uint32_t baudrate           = SerialCommConfig::UART_BAUDRATE;
+            size_t rx_buffer_size       = SerialCommConfig::UART_RX_BUFFER_SIZE;
+            size_t tx_buffer_size       = SerialCommConfig::UART_TX_BUFFER_SIZE;
             bool auto_interbyte_timeout = true;
             float interbyte_chars       = 3.5f;
             uint32_t timeout_ms         = 10;

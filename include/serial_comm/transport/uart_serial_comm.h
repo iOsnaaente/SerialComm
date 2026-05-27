@@ -10,9 +10,9 @@
 
 #pragma once
 
-#include "serial_comm_transport.h"
-#include "serial_comm_config.h"
-#include "serial_comm_utils.h"
+#include "serial_comm/core/serial_comm_transport.h"
+#include "serial_comm/serial_comm_config.h"
+#include "serial_comm/core/serial_comm_utils.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -33,12 +33,12 @@ class UARTTransport final : public ISerialCommTransport {
              * @brief ESP32 UART hardware configuration
              */
             struct HardwareConfig {
-                int uart_port   = SERIAL_COMM_UART_PORT;
-                int tx_pin      = SERIAL_COMM_UART_TX_PIN;
-                int rx_pin      = SERIAL_COMM_UART_RX_PIN;
-                int rts_pin     = SERIAL_COMM_UART_RTS_PIN;
-                int cts_pin     = SERIAL_COMM_UART_CTS_PIN;
-                int de_pin      = SERIAL_COMM_UART_DE_PIN; 
+                int uart_port   = SerialCommConfig::UART_PORT;
+                int tx_pin      = SerialCommConfig::UART_TX_PIN;
+                int rx_pin      = SerialCommConfig::UART_RX_PIN;
+                int rts_pin     = SerialCommConfig::UART_RTS_PIN;
+                int cts_pin     = SerialCommConfig::UART_CTS_PIN;
+                int de_pin      = SerialCommConfig::UART_DE_PIN; 
             };
 
 
@@ -63,9 +63,7 @@ class UARTTransport final : public ISerialCommTransport {
 
 
     private:
-        static void uart_event_task(
-            void* args
-        );
+        static void uart_event_task( void* args );
 
 
     public:
@@ -73,9 +71,7 @@ class UARTTransport final : public ISerialCommTransport {
          * @brief   Constructor for UARTTransport
          * @param   hw_cfg Hardware configuration for the UART transport
          */
-        explicit UARTTransport(
-            const HardwareConfig& hw_cfg
-        );
+        explicit UARTTransport( const HardwareConfig& hw_cfg );
 
         /* Deleted copy and move constructors */
         UARTTransport( UARTTransport&& ) = delete;

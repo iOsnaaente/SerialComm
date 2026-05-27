@@ -24,6 +24,7 @@
 #include "serial_comm_protocol.h"
 #include "serial_comm_parser.h"
 #include "serial_comm_utils.h"
+#include "serial_comm_config.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -62,9 +63,11 @@ class SerialComm {
          */
         struct Config {
             /* Inter-byte timeout in microseconds (us) */
-            uint32_t inter_byte_timeout_us = 1000;
+            uint32_t inter_byte_timeout_us =
+                SerialCommConfig::INTERBYTE_TIMEOUT_US;
             /* Enable timeout watchdog */
-            bool enable_inter_byte_timeout = true;
+            bool enable_inter_byte_timeout =
+                SerialCommConfig::ENABLE_INTERBYTE_TIMEOUT;
         };
 
     private:
@@ -166,7 +169,7 @@ class SerialComm {
          * @return  Middleware result
          */
         errCode register_callback(
-            SerialCommProtoCommand command,
+            SerialCommCommand command,
             packet_callback_t callback,
             void* ctx
         );
@@ -177,12 +180,15 @@ class SerialComm {
          * @return  Middleware result
          */
         errCode unregister_callback( 
-            SerialCommProtoCommand command 
+            SerialCommCommand command 
         );
 
     private:
         /**
          * @brief   Static RX callback from transport
+         * @param   ctx User context (pointer to SerialComm instance)
+         * @param   data Received data buffer
+         * @param   len Length of received data
          */
         static void transport_rx_callback(
             void* ctx,
@@ -192,6 +198,8 @@ class SerialComm {
 
         /**
          * @brief   Process incoming RX data
+         * @param   data Received data buffer
+         * @param   len Length of received data
          */
         void process_rx_data( const uint8_t* data, size_t len );
 

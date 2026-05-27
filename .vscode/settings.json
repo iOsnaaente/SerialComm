@@ -1,3 +1,8 @@
 {
-    "idf.currentSetup": "/home/iosnaaente/esp/v5.5.1/esp-idf"
+    "idf.currentSetup": "/home/iosnaaente/esp/v5.5.1/esp-idf",
+
+    "editor.rulers": [ 75, 85 ],
+    "workbench.colorCustomizations": {
+        "editorRuler.foreground": "#174117"
+    },
 }

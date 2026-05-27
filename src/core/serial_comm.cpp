@@ -46,12 +46,23 @@ errCode SerialComm::init( const Config &cfg ) {
     // Dispatcher initialization
     SerialCommDispatcher::Config dispatcher_cfg = {};
     dispatcher_cfg.task_name = "SerialCommDispatcher";
-    dispatcher_cfg.rx_queue_len = 16;
-    dispatcher_cfg.task_stack_size = 4096;
-    dispatcher_cfg.task_priority = 5;
+    
+    dispatcher_cfg.rx_queue_len = 
+        SerialCommConfig::DISPATCHER_QUEUE_SIZE;
+    
+    dispatcher_cfg.task_stack_size =
+        SerialCommConfig::DISPATCHER_TASK_STACK_SIZE;
+    
+    dispatcher_cfg.task_priority =
+        SerialCommConfig::DISPATCHER_TASK_PRIORITY;
+    
     errCode err = this->dispatcher_.init( dispatcher_cfg );
     if ( err != errCode::OK ) {
-        ESP_LOGE( TAG, "Failed to initialize dispatcher: %s", err_to_str(err) );
+        ESP_LOGE( 
+            TAG, 
+            "Failed to initialize dispatcher: %s", 
+            err_to_str(err) 
+        );
         this->cleanup_resources();
         return err;
     }
@@ -101,7 +112,7 @@ errCode SerialComm::start() {
         return err;
     }
     // Start transport
-    errCode err = this->transport_->start();
+    err = this->transport_->start();
     if (err != errCode::OK) {
         ESP_LOGE( TAG, "Failed to start transport: %s", err_to_str(err) );
         this->dispatcher_.stop();
@@ -159,7 +170,7 @@ errCode SerialComm::send( const SerialCommProtoPacket& packet ) {
         return errCode::ERR_TIMEOUT;
     }
 
-    uint8_t tx_buffer[ SERIAL_COMM_MAX_PACKET_SIZE_V1 ];
+    uint8_t tx_buffer[ SERIAL_COMM_MAX_PACKET_SIZE_V2 ];
     size_t packet_len =
         SerialCommProtocol::encode(
             packet,
@@ -200,15 +211,21 @@ errCode SerialComm::setup_interbyte_watchdog( ){
 
 void SerialComm::on_interbyte_timeout() {
     if ( xSemaphoreTake( this->parser_mutex_, portMAX_DELAY ) == pdTRUE ) {
-        this->parser_.reset();
+        bool had_partial_packet =
+            this->parser_.state() != SerialCommParser::State::WAIT_HEADER_0;
+        if ( had_partial_packet ) {
+            this->parser_.reset();
+        }
         xSemaphoreGive( this->parser_mutex_ );
-        ESP_LOGW( TAG, "Parser timeout reset" );
+        if ( had_partial_packet ) {
+            ESP_LOGW( TAG, "Parser timeout reset" );
+        }
     }
 }
 
 
 errCode SerialComm::register_callback(
-    SerialCommProtoCommand command,
+    SerialCommCommand command,
     packet_callback_t callback,
     void* ctx
 ) {
@@ -220,7 +237,7 @@ errCode SerialComm::register_callback(
 }
 
 
-errCode SerialComm::unregister_callback( SerialCommProtoCommand command ) {
+errCode SerialComm::unregister_callback( SerialCommCommand command ) {
     return this->dispatcher_.unregister_callback( command );
 }
 
@@ -230,7 +247,8 @@ void SerialComm::transport_rx_callback(
     const uint8_t* data, 
     size_t len
 ) {
-    if (ctx == nullptr){
+    // Verify context
+    if ( ctx == nullptr ){
         return;
     }
     auto* self = static_cast<SerialComm*>(ctx);
@@ -239,6 +257,7 @@ void SerialComm::transport_rx_callback(
 
 
 void SerialComm::process_rx_data( const uint8_t* data, size_t len ) {
+    // Verify data pointer
     if (data == nullptr){
         ESP_LOGE( TAG, "Received null data pointer" );
         return;
@@ -247,17 +266,39 @@ void SerialComm::process_rx_data( const uint8_t* data, size_t len ) {
     if ( this->interbyte_watchdog_ != nullptr ) {
         this->interbyte_watchdog_->kick();
     }
-    // Parse Stream 
-    SerialCommProtoPacket packet;
-    xSemaphoreTake( this->parser_mutex_, portMAX_DELAY );
-    bool valid_packet = this->parser_.parse_buffer( data, len, packet );
-    xSemaphoreGive( this->parser_mutex_ );
+    // Parse Stream with multiples packets support
+    size_t offset_packet = 0;
+    while ( offset_packet < len ){
+        SerialCommProtoPacket packet;
+        size_t consumed_bytes = 0;
+        xSemaphoreTake( this->parser_mutex_, portMAX_DELAY );
+        bool valid_packet = this->parser_.parse_next_packet( 
+            &data[offset_packet], 
+            len - offset_packet,
+            consumed_bytes, 
+            packet 
+        );
+        xSemaphoreGive( this->parser_mutex_ );
 
-    // Dispatch packet if valid
-    if ( valid_packet ) {
-        errCode err = this->dispatcher_.enqueue( packet );
-        if ( err != errCode::OK ) {
-            ESP_LOGE( TAG, "Failed to enqueue packet" );
+        // Safety check to avoid infinite loop on parser error
+        if ( consumed_bytes == 0 ) {
+            ESP_LOGE( TAG, "Parser failed to consume bytes" );
+            break;
+        }
+        offset_packet += consumed_bytes;
+    
+        // Dispatch packet if valid
+        if ( valid_packet ) {
+            errCode err = this->dispatcher_.enqueue( packet );
+            if ( err != errCode::OK ) {
+                ESP_LOGE( TAG, "Failed to enqueue packet" );
+            } else {
+                ESP_LOGD( TAG, "Packet enqueued: Command=0x%02X, SeqID=%u, PayloadLen=%u",
+                    packet.header.command,
+                    packet.header.seq_id,
+                    packet.header.payload_len
+                );
+            }
         }
     }
 }

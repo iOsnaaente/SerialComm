@@ -25,6 +25,7 @@
 
 #pragma once 
 
+#include "serial_comm_config.h"
 #include "serial_comm_protocol.h"
 #include "serial_comm_utils.h"
 
@@ -53,11 +54,14 @@ class SerialCommDispatcher {
          */
         struct Config {
             /* RX packet queue size */
-            uint32_t rx_queue_len = 16;
+            uint32_t rx_queue_len =
+                SerialCommConfig::DISPATCHER_QUEUE_SIZE;
             /* Dispatcher task stack size */
-            uint32_t task_stack_size = 4096;
+            uint32_t task_stack_size =
+                SerialCommConfig::DISPATCHER_TASK_STACK_SIZE;
             /* Dispatcher task priority */
-            UBaseType_t task_priority = 5;
+            UBaseType_t task_priority =
+                SerialCommConfig::DISPATCHER_TASK_PRIORITY;
             /* Dispatcher task name */
             const char* task_name = "SerialCommDispatcher";
         };
@@ -189,7 +193,7 @@ class SerialCommDispatcher {
          * @return  Result code
          */
         SerialCommResult_Codes::errCode register_callback(
-            SerialCommProtoCommand command,
+            SerialCommCommand command,
             packet_callback_t callback,
             void* ctx
         );
@@ -200,7 +204,7 @@ class SerialCommDispatcher {
          * @return  Result code
          */
         SerialCommResult_Codes::errCode unregister_callback(
-            SerialCommProtoCommand command
+            SerialCommCommand command
         );
 
     public:
