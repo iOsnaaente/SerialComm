@@ -189,7 +189,7 @@ class SerialCommDispatcher {
          * @return  Result code
          */
         SerialCommResult_Codes::errCode register_callback(
-            SerialCommProtoCommand command,
+            SerialCommCommand command,
             packet_callback_t callback,
             void* ctx
         );
@@ -200,7 +200,7 @@ class SerialCommDispatcher {
          * @return  Result code
          */
         SerialCommResult_Codes::errCode unregister_callback(
-            SerialCommProtoCommand command
+            SerialCommCommand command
         );
 
     public:

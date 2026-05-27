@@ -159,7 +159,7 @@ errCode SerialComm::send( const SerialCommProtoPacket& packet ) {
         return errCode::ERR_TIMEOUT;
     }
 
-    uint8_t tx_buffer[ SERIAL_COMM_MAX_PACKET_SIZE_V1 ];
+    uint8_t tx_buffer[ SERIAL_COMM_MAX_PACKET_SIZE_V2 ];
     size_t packet_len =
         SerialCommProtocol::encode(
             packet,
@@ -208,7 +208,7 @@ void SerialComm::on_interbyte_timeout() {
 
 
 errCode SerialComm::register_callback(
-    SerialCommProtoCommand command,
+    SerialCommCommand command,
     packet_callback_t callback,
     void* ctx
 ) {
@@ -220,7 +220,7 @@ errCode SerialComm::register_callback(
 }
 
 
-errCode SerialComm::unregister_callback( SerialCommProtoCommand command ) {
+errCode SerialComm::unregister_callback( SerialCommCommand command ) {
     return this->dispatcher_.unregister_callback( command );
 }
 

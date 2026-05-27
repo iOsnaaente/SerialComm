@@ -72,7 +72,7 @@ bool SerialCommParser::parse_byte(
         // READ COMMAND
         case State::READ_COMMAND: {
             packet_.header.command =
-                static_cast<SerialCommProtoCommand>(byte);
+                static_cast<SerialCommCommand>(byte);
             this->state_ = State::READ_LENGTH_L;
             break;
         }

@@ -43,8 +43,6 @@ const char* serial_command_to_str(SerialCommCommand cmd){
             return "READ_UTILITY";
         case SerialCommCommand::WRITE_UTILITY:
             return "WRITE_UTILITY";
-        case SerialCommCommand::SMOOTH_MOVE:
-            return "SMOOTH_MOVE";
         default:
             return "UNKNOWN_COMMAND";
     }

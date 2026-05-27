@@ -151,7 +151,7 @@ errCode SerialCommDispatcher::enqueue(
 
 
 errCode SerialCommDispatcher::register_callback(
-    SerialCommProtoCommand command,
+    SerialCommCommand command,
     packet_callback_t callback,
     void* ctx
 ) {
@@ -174,7 +174,7 @@ errCode SerialCommDispatcher::register_callback(
 
 
 errCode SerialCommDispatcher::unregister_callback(
-    SerialCommProtoCommand command
+    SerialCommCommand command
 ) {
     uint8_t cmd = static_cast<uint8_t>( command );
     xSemaphoreTake( this->callback_mutex_, portMAX_DELAY );

@@ -166,7 +166,7 @@ class SerialComm {
          * @return  Middleware result
          */
         errCode register_callback(
-            SerialCommProtoCommand command,
+            SerialCommCommand command,
             packet_callback_t callback,
             void* ctx
         );
@@ -177,7 +177,7 @@ class SerialComm {
          * @return  Middleware result
          */
         errCode unregister_callback( 
-            SerialCommProtoCommand command 
+            SerialCommCommand command 
         );
 
     private:
