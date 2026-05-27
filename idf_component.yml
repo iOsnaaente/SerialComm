@@ -1,0 +1,247 @@
+version: "0.2.4-beta"
+
+description: >
+  Serial communication middleware for ESP-IDF with
+  services, topics, actions and transaction support.
+
+  A lightweight, extensible middleware component for ESP-IDF that provides
+  a structured communication framework inspired by ROS2 and micro-ROS 
+  semantics. 
+
+url: "https://github.com/iOsnaaente/SerialComm"
+
+dependencies:
+  idf: ">=5.0"
+
+
+
+milestones:
+  - "Migration from callback-based transport to semantic middleware"
+  - "Protocol V2 introduction"
+  - "Middleware ROS-inspired abstraction"
+  - "Transport-independent architecture"
+
+
+
+planned:
+
+  - version: "0.2.5"
+    description: >
+      Create an Abstration Layer where the user can define their own 
+      middleware behavior based on a predefined ROS-like API structure.
+      It will allow users to define the structure of the packet of requests
+      and reply to automatically correlate the request and reply callbacks.
+      
+    features:
+      - Middleware abstraction layer
+      - ROS-like service/topic/action API
+      - Generic serialization API
+  
+
+  - version: "0.3.x"
+    description: >
+      Alpha release with initial Wi-Fi transport support and middleware
+      abstraction layer.
+
+    features:
+      - Wi-Fi transport support
+      - Bluetooth transport support
+      - ROS-like service/topic/action API
+      - Service discovery mechanism
+      - Middleware security features
+      - Enhanced logging and diagnostics
+
+    breakpoints:
+      - "Added Wi-Fi transport implementation"
+      - "Introduced middleware abstraction layer"
+      - "Implemented ROS-like communication semantics"
+      - "Added generic serialization API"
+
+
+roadmap:
+
+  - version: "0.2.4"
+    description: >
+      Refactored middleware configuration system and integrated
+      advanced menuconfig support and reorganize the directory structure.
+
+    features:
+      - Kconfig integration
+      - Config namespace migration
+      - Runtime feature toggles
+      - Dispatcher configuration
+      - Middleware feature flags
+      - Logging configuration
+      - Directory structure reorganization
+      - Add component documentation and roadmap
+
+    breakpoints:
+      - "Migrated hardcoded values into menuconfig"
+      - "Separated public/internal configuration"
+      - "Added configurable middleware features"
+      - "Added dispatcher/task tunables"
+      - "Improved component modularity"
+
+
+  - version: "0.2.3"
+    description: >
+      Added transaction manager and synchronous request/reply service
+      support.
+
+    features:
+      - Transaction manager
+      - Blocking service calls
+      - Reply synchronization
+      - Timeout handling
+      - Pending transaction tracking
+
+    breakpoints:
+      - "Implemented pending transaction table"
+      - "Added service request blocking API"
+      - "Added timeout-based transaction cleanup"
+      - "Integrated transaction manager into middleware"
+
+
+  - version: "0.2.2"
+    description: >
+      Introduced middleware abstraction layer inspired by ROS2 and
+      micro-ROS communication semantics.
+
+    features:
+      - SerialCommManager
+      - Service abstraction
+      - Topic abstraction
+      - Action abstraction
+      - Generic serializer API
+      - Middleware endpoint registration
+
+    breakpoints:
+      - "Separated transport/core/middleware architecture"
+      - "Introduced ROS-like services/topics/actions"
+      - "Implemented typed callback abstraction"
+      - "Added middleware serialization layer"
+      - "Introduced semantic middleware API"
+
+
+  - version: "0.2.1"
+    description: >
+      Added Protocol V2 fields that support sequence identifiers and
+      semantic request/reply abstraction.
+
+    design decisions:
+      - Added 16-bit SEQ_ID field to packet structure for transaction 
+        correlation was demonstrate be an important feature for supportting
+        more complex communication patterns and to enable the implementation 
+        of a transaction manager in the middleware layer, which is a key 
+        component for  supporting more complex communication patterns like 
+        synchronous service calls and multi-packet transactions
+      - The Seq_id and the request/reply bit in the command field was 
+        planned to be present in the protocol version 2, with the source  
+        and destination fields.
+
+    features:
+      - Some Protocol V2 fields of packet structure
+      - SEQ_ID support
+      - Request/reply command bit
+      - Transaction correlation
+      - Multiple pending transactions
+      - Reply packet helpers
+
+    breakpoints:
+      - "Added 16-bit sequence identifier"
+      - "Implemented request/reply MSB semantic in command field"
+      - "Refactored protocol structures"
+      - "Updated parser for SEQ_ID support"
+      - "Added transaction matching architecture"
+      - "Updated Python client for V2 compatibility"
+
+    troubleshooting:
+      - issue: "Protocol incompatibility with V1 clients"
+        solution: >
+          V2 packets now include SEQ_ID field and request/reply bit, that 
+          forces a new implementation of the client to support the new 
+          protocol version.
+
+
+  - version: "0.1.2"
+    description: >
+      Added dispatcher layer, asynchronous packet processing and
+      queue-based RX architecture.
+
+    features:
+      - SerialCommDispatcher
+      - Async RX queue processing
+      - Dispatcher task abstraction
+      - Packet enqueue/dequeue
+      - Command callback registry
+      - Multi-packet parsing support
+
+    breakpoints:
+      - "Separated parser from callback execution"
+      - "Migrated RX flow to dispatcher task"
+      - "Added queue-based packet routing"
+      - "Implemented support for multiple packets per RX buffer"
+      - "Improved middleware concurrency architecture"
+
+    troubleshooting:
+      - issue: "Lost packets under high RX throughput"
+        solution: >
+          Increase dispatcher queue size and ensure callbacks do not
+          block dispatcher execution.
+
+      - issue: "Parser only processing first packet"
+        solution: >
+          Refactor parse_buffer() to continue parsing after valid
+          packet extraction and create the parse_next_packet() helper 
+          function that supports incremental parsing.
+          It solution also add a feature to support multiple packets per 
+          RX buffer, which is a common scenario in a non stream-based 
+          transport like Wi-Fi and other kinds of networks.
+
+
+  - version: "0.1.1"
+    description: >
+      Added inter-byte timeout watchdog support and parser stream
+      recovery mechanisms.
+
+    features:
+      - Inter-byte timeout watchdog
+      - Parser reset recovery
+      - Dynamic timeout configuration
+      - UART timeout helpers
+      - Parser mutex protection
+
+    breakpoints:
+      - "Integrated GPTimer-based watchdog abstraction"
+      - "Moved parser timeout logic from parser to middleware layer"
+      - "Added parser synchronization recovery"
+      - "Identified watchdog false-positive resets"
+      - "Adjusted timeout strategy for USB/UART scheduling jitter"
+      - "Changed the abstraction architecture for the whole protocol stack"
+
+    troubleshooting:
+      - issue: "Parser timeout reset spam"
+        solution: >
+          Reset parser only when packet assembly is in progress.
+
+
+  - version: "0.1.0"
+    description: >
+      Initial release with UART transport layer, protocol framing,
+      CRC16 CCITT validation and incremental parser support.
+
+    features:
+      - UART transport abstraction
+      - Protocol V1 implementation
+      - Incremental byte stream parser
+      - CRC16 CCITT packet validation
+      - Packet encoding/decoding
+      - RX callback registration
+      - Basic middleware lifecycle
+
+    breakpoints:
+      - "Defined transport abstraction using ISerialCommTransport"
+      - "Implemented incremental parser state machine"
+      - "Added packet framing and CRC16 CCITT validation"
+      - "Added FreeRTOS-safe TX mutex protection"
+      - First public release 

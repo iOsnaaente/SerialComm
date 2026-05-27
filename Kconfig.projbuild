@@ -1,0 +1,219 @@
+menu "SerialComm Middleware"
+
+    menu "Transport Configuration"
+
+        config SERIAL_COMM_UART_PORT
+            int "UART Port"
+            range 0 2
+            default 2
+
+        config SERIAL_COMM_UART_BAUDRATE
+            int "UART Baudrate"
+            range 9600 1000000
+            default 921600
+
+        config SERIAL_COMM_UART_TX_PIN
+            int "UART TX GPIO"
+            range -1 48
+            default 17
+
+        config SERIAL_COMM_UART_RX_PIN
+            int "UART RX GPIO"
+            range -1 48
+            default 16
+
+        config SERIAL_COMM_UART_RTS_PIN
+            int "UART RTS GPIO"
+            range -1 48
+            default -1
+
+        config SERIAL_COMM_UART_CTS_PIN
+            int "UART CTS GPIO"
+            range -1 48
+            default -1
+
+        config SERIAL_COMM_UART_DE_PIN
+            int "UART RS485 DE GPIO"
+            range -1 48
+            default -1
+
+    endmenu
+
+
+    menu "UART Driver"
+
+        config SERIAL_COMM_UART_RX_BUFFER_SIZE
+            int "RX Buffer Size"
+            default 2048
+
+        config SERIAL_COMM_UART_TX_BUFFER_SIZE
+            int "TX Buffer Size"
+            default 2048
+
+        config SERIAL_COMM_UART_EVENT_QUEUE_SIZE
+            int "UART Event Queue Size"
+            default 32
+
+    endmenu
+
+
+    menu "Protocol"
+
+        config SERIAL_COMM_MAX_PAYLOAD_SIZE
+            int "Maximum Payload Size"
+            default 512
+
+        config SERIAL_COMM_ENABLE_CRC
+            bool "Enable CRC16"
+            default y
+
+        config SERIAL_COMM_ENABLE_SEQ_ID
+            bool "Enable Sequence ID"
+            default y
+
+    endmenu
+
+
+    menu "Parser"
+
+        config SERIAL_COMM_ENABLE_INTERBYTE_TIMEOUT
+            bool "Enable Inter-byte Timeout"
+            default y
+
+        choice SERIAL_COMM_INTERBYTE_TIMEOUT_MODE
+            prompt "Inter-byte Timeout Mode"
+            default SERIAL_COMM_INTERBYTE_TIMEOUT_DYNAMIC
+            help
+                Select how the inter-byte timeout is calculated.
+            config SERIAL_COMM_INTERBYTE_TIMEOUT_FIXED
+                bool "Fixed Timeout"
+            config SERIAL_COMM_INTERBYTE_TIMEOUT_DYNAMIC
+                bool "Character Time Based"
+
+        endchoice
+
+
+        config SERIAL_COMM_INTERBYTE_TIMEOUT_US
+            int "Fixed Inter-byte Timeout (us)"
+            default 1000
+            depends on SERIAL_COMM_INTERBYTE_TIMEOUT_FIXED
+            help
+                Fixed timeout value in microseconds (us).
+
+
+        config SERIAL_COMM_INTERBYTE_TIMEOUT_CHARS
+            int "Character Times"
+            range 2 64
+            default 5
+            depends on SERIAL_COMM_INTERBYTE_TIMEOUT_DYNAMIC
+            help
+                Number of UART character times used to compute
+                the inter-byte timeout dynamically based on baudrate.
+    endmenu
+
+
+    menu "Dispatcher"
+
+        config SERIAL_COMM_DISPATCHER_QUEUE_SIZE
+            int "Dispatcher Queue Size"
+            default 32
+
+        config SERIAL_COMM_DISPATCHER_TASK_STACK_SIZE
+            int "Dispatcher Task Stack Size"
+            range 2048 16384
+            default 8192
+
+        config SERIAL_COMM_DISPATCHER_TASK_PRIORITY
+            int "Dispatcher Task Priority"
+            range 2 10 
+            default 5
+
+    endmenu
+
+
+    menu "Transactions"
+
+        config SERIAL_COMM_MAX_PENDING_TRANSACTIONS
+            int "Maximum Pending Transactions"
+            range 1 32
+            default 16
+
+        config SERIAL_COMM_TRANSACTION_TIMEOUT_MS
+            int "Default Transaction Timeout in ms"
+            default 1000
+
+    endmenu
+
+
+    menu "Middleware Features"
+
+        config SERIAL_COMM_ENABLE_SERVICES
+            bool "Enable Services"
+            default y
+
+        config SERIAL_COMM_ENABLE_TOPICS
+            bool "Enable Topics"
+            default y
+
+        config SERIAL_COMM_ENABLE_ACTIONS
+            bool "Enable Actions"
+            default n
+
+        if SERIAL_COMM_ENABLE_SERVICES
+            config SERIAL_COMM_MAX_SERVICES
+                int "Maximum Services"
+                range 1 64
+                default 16
+                help
+                    Maximum number of registered service servers.
+        endif
+
+        if SERIAL_COMM_ENABLE_TOPICS
+            config SERIAL_COMM_MAX_SUBSCRIPTIONS
+                int "Maximum Topic Subscriptions"
+                range 1 64
+                default 16
+                help
+                    Maximum number of registered topic subscribers.
+
+            config SERIAL_COMM_MAX_PUBLISHERS
+                int "Maximum Topic Publishers"
+                range 1 64
+                default 16
+                help
+                    Maximum number of registered topic publishers.
+        endif
+
+        if SERIAL_COMM_ENABLE_ACTIONS
+            config SERIAL_COMM_MAX_ACTIONS
+                int "Maximum Actions"
+                range 1 32
+                default 8
+                help
+                    Maximum number of registered action servers.
+        endif
+
+    endmenu
+
+
+    menu "Tasks"
+
+        config SERIAL_COMM_UART_TASK_STACK_SIZE
+            int "UART Task Stack Size"
+            default 4096
+
+        config SERIAL_COMM_UART_TASK_PRIORITY
+            int "UART Task Priority"
+            range 1 10
+            default 5
+
+        config SERIAL_COMM_UART_TASK_CORE
+            int "UART Task Core"
+            range -1 1
+            default -1
+            help 
+                CPU core affinity for the UART task. Set to -1 for no affinity.
+
+    endmenu
+
+endmenu
