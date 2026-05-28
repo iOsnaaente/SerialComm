@@ -1,4 +1,4 @@
-version: "0.2.4-beta"
+version: "0.2.6-beta"
 
 description: >
   Serial communication middleware for ESP-IDF with
@@ -14,29 +14,7 @@ dependencies:
   idf: ">=5.0"
 
 
-
-milestones:
-  - "Migration from callback-based transport to semantic middleware"
-  - "Protocol V2 introduction"
-  - "Middleware ROS-inspired abstraction"
-  - "Transport-independent architecture"
-
-
-
 planned:
-
-  - version: "0.2.5"
-    description: >
-      Create an Abstration Layer where the user can define their own 
-      middleware behavior based on a predefined ROS-like API structure.
-      It will allow users to define the structure of the packet of requests
-      and reply to automatically correlate the request and reply callbacks.
-      
-    features:
-      - Middleware abstraction layer
-      - ROS-like service/topic/action API
-      - Generic serialization API
-  
 
   - version: "0.3.x"
     description: >
@@ -59,6 +37,34 @@ planned:
 
 
 roadmap:
+
+
+  - version: "0.2.6"
+    description: >
+      Added auto-code generator to convert the ``user_app`` definitions 
+      of events, requests and missions into structures and serializers for 
+      the middleware layer.
+
+    features:
+      - auto code generator for user_app definitions
+      - automatic generation of serializers for user_app definitions
+      - auto import into the middleware layer
+      - support for custom metadata in the user_app definitions
+      - support for custom field types in the user_app definitions
+
+
+  - version: "0.2.5"
+    description: >
+      Create an Abstration Layer where the user can define their own 
+      middleware behavior based on a predefined ROS-like API structure.
+      It will allow users to define the structure of the packet of requests
+      and reply to automatically correlate the request and reply callbacks.
+      
+    features:
+      - Middleware abstraction layer
+      - ROS-like event/request/mission API
+      - Generic serialization API
+  
 
   - version: "0.2.4"
     description: >
