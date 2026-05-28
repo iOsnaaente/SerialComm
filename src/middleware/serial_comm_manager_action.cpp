@@ -5,7 +5,7 @@
  * @date    Created on 26 of May, 2026
  */
 
-#include "serial_comm_manager.h"
+#include "serial_comm/middleware/serial_comm_manager.h"
 
 bool SerialCommManager::is_action_command( Command command ) const {
     for ( size_t i = 0; i < MAX_ACTIONS; i++ ) {

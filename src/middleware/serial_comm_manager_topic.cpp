@@ -5,7 +5,7 @@
  * @date    Created on 26 of May, 2026
  */
 
-#include "serial_comm_manager.h"
+#include "serial_comm/middleware/serial_comm_manager.h"
 
 
 SerialCommManager::TopicEntry* SerialCommManager::find_topic(

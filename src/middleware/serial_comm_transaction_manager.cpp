@@ -13,7 +13,7 @@
  */
 
 
-#include "serial_comm_transaction_manager.h"
+#include "serial_comm/middleware/serial_comm_transaction_manager.h"
 
 
 /* To use the errCode and err_to_str easily */

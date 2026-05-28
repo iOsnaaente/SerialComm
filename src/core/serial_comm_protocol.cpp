@@ -5,7 +5,7 @@
  * @date    Created on 22 of May, 2026
 **/
 
-#include "serial_comm_protocol.h"
+#include "serial_comm/core/serial_comm_protocol.h"
 
 
 /* To use the errCode and err_to_str easily */

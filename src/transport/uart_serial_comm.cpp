@@ -3,7 +3,7 @@
  * @brief ESP32 UART transport implementation
  */
 
-#include "uart_serial_comm.h"
+#include "serial_comm/transport/uart_serial_comm.h"
 
 
 /* To use the errCode and err_to_str easily */

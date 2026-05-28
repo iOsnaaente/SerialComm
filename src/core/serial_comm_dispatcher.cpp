@@ -4,7 +4,7 @@
  */
 
 
-#include "serial_comm_dispatcher.h"
+#include "serial_comm/core/serial_comm_dispatcher.h"
 
 
 /* To use the errCode and err_to_str easily */

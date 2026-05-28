@@ -21,7 +21,7 @@
 #include "serial_comm/core/serial_comm_utils.h"
 
 #include "serial_comm/middleware/topic/serial_comm_topic_base.h"
-#include "serial_comm/middleware/serial_comm_serializer.h"
+#include "serial_comm/common/serial_comm_serializer_base.hpp"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -113,7 +113,7 @@ class SerialCommTopic : public ITopicBase {
                 return errCode::ERR_NOT_INITIALIZED;
             }
             Msg msg;
-            bool ret = Serializer<Msg>::deserialize(
+            bool ret = SerialCommSerializer<Msg>::deserialize(
                 packet.payload,
                 packet.header.payload_len,
                 msg

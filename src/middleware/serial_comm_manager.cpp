@@ -3,7 +3,7 @@
  * @brief   High-level semantic middleware manager implementation
  */
 
-#include "serial_comm_manager.h"
+#include "serial_comm/middleware/serial_comm_manager.h"
 
 
 /* To use the errCode and err_to_str easily */

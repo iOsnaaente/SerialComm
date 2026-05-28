@@ -27,7 +27,9 @@
 #include "serial_comm/serial_comm.h"
 
 #include "serial_comm/middleware/serial_comm_transaction_manager.h"
-#include "serial_comm/middleware/serial_comm_serializer.h"
+#include "serial_comm/common/serial_comm_serializer_base.hpp"
+
+#include "serial_comm/generated/generated_serializers.hpp"
 
 #include "serial_comm/middleware/service/serial_comm_service.h"
 #include "serial_comm/middleware/action/serial_comm_action.h"
@@ -58,10 +60,9 @@ class SerialCommManager {
                 : 1;
         static constexpr size_t MAX_TOPICS =
             ((SerialCommConfig::MAX_SUBSCRIPTIONS +
-              SerialCommConfig::MAX_PUBLISHERS) > 0)
-                ? (SerialCommConfig::MAX_SUBSCRIPTIONS +
-                   SerialCommConfig::MAX_PUBLISHERS)
-                : 1;
+                SerialCommConfig::MAX_PUBLISHERS) > 0)
+                    ? (SerialCommConfig::MAX_SUBSCRIPTIONS + SerialCommConfig::MAX_PUBLISHERS)
+                    : 1;
         static constexpr size_t MAX_ACTIONS =
             (SerialCommConfig::MAX_ACTIONS > 0)
                 ? SerialCommConfig::MAX_ACTIONS
@@ -233,7 +234,7 @@ class SerialCommManager {
             uint8_t payload[ SERIAL_COMM_MAX_PAYLOAD ];
             size_t payload_size = 0;
 
-            bool ok = Serializer<Req>::serialize(
+            bool ok = SerialCommSerializer<Req>::serialize(
                 request,
                 payload,
                 sizeof(payload),
@@ -275,11 +276,13 @@ class SerialCommManager {
             if ( err != errCode::OK ) {
                 return err;
             }
-
-            ok = Serializer<Res>::deserialize(
+            
+            size_t consumed_size = 0;
+            ok = SerialCommSerializer<Res>::deserialize(
                 reply_packet.payload,
                 reply_packet.header.payload_len,
-                response
+                response,
+                &consumed_size
             );
             if ( !ok ) {
                 return errCode::ERR_FAIL;

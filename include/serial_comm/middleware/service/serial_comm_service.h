@@ -22,7 +22,7 @@
 #include "serial_comm/core/serial_comm_utils.h"
 
 #include "serial_comm/middleware/service/serial_comm_service_base.h"
-#include "serial_comm/middleware/serial_comm_serializer.h"
+#include "serial_comm/common/serial_comm_serializer_base.hpp"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -140,12 +140,21 @@ class SerialCommService: public IServiceBase  {
             }
 
             Req request_msg;
-            bool ret = Serializer<Req>::deserialize(
+            size_t consumed_size = 0;
+            bool ret = SerialCommSerializer<Req>::deserialize(
                 request.payload,
                 request.header.payload_len,
-                request_msg
+                request_msg,
+                &consumed_size
             );
             if ( !ret ) {
+                ESP_LOGW(
+                    "SERVICE",
+                    "Deserialization failed for cmd=0x%02X, consumed=%u/%u",
+                    static_cast<uint8_t>(request.header.command),
+                    consumed_size,
+                    request.header.payload_len
+                );
                 return errCode::ERR_PARSER;
             }
 
@@ -156,7 +165,7 @@ class SerialCommService: public IServiceBase  {
             }
 
             size_t serializer_size = 0;
-            ret = Serializer<Res>::serialize(
+            ret = SerialCommSerializer<Res>::serialize(
                 response_msg,
                 response.payload,
                 sizeof(response.payload),

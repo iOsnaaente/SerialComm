@@ -3,7 +3,7 @@
  * @brief   Core serial communication middleware implementation
  */
 
-#include "serial_comm.h"
+#include "serial_comm/serial_comm.h"
 
 
 /* To use the errCode and err_to_str easily */

@@ -6,21 +6,14 @@
  * @date    Created on 26 of May, 2026
  */
 
-#include "serial_comm_manager.h"
+#include "serial_comm/middleware/serial_comm_manager.h"
 
-static const char* TAG = "SERIAL_COMM_MANAGER";
+static const char* TAG = "SERIAL_COMM_MANAGER_SERVICE";
 
 
 void SerialCommManager::handle_service_request(
     const SerialCommProtoPacket& packet
 ) {
-    ESP_LOGD(
-        TAG,
-        "Request packet received: cmd=0x%02X seq=%u len=%u",
-        static_cast<uint8_t>( packet.header.command ),
-        packet.header.seq_id,
-        packet.header.payload_len
-    );
     auto* entry = this->find_service( packet.header.command );
     if ( entry == nullptr || entry->service == nullptr ) {
         ESP_LOGW(

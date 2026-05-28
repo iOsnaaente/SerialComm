@@ -25,9 +25,9 @@
 
 #pragma once 
 
-#include "serial_comm_config.h"
-#include "serial_comm_protocol.h"
-#include "serial_comm_utils.h"
+#include "serial_comm/serial_comm_config.h"
+#include "serial_comm/core/serial_comm_protocol.h"
+#include "serial_comm/core/serial_comm_utils.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"

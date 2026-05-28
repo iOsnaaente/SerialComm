@@ -26,7 +26,7 @@
 #include "serial_comm/core/serial_comm_utils.h"
 
 #include "serial_comm/middleware/action/serial_comm_action_base.h"
-#include "serial_comm/middleware/serial_comm_serializer.h"
+#include "serial_comm/common/serial_comm_serializer_base.hpp"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -169,7 +169,7 @@ class SerialCommAction : public IActionBase {
                 return errCode::ERR_NOT_INITIALIZED;
             }
             Goal goal;
-            bool ret = Serializer<Goal>::deserialize(
+            bool ret = SerialCommSerializer<Goal>::deserialize(
                 packet.payload,
                 packet.header.payload_len,
                 goal

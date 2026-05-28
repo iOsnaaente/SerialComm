@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "core/serial_comm_protocol.h"
-#include "core/serial_comm_utils.h"
+#include "serial_comm/core/serial_comm_protocol.h"
+#include "serial_comm/core/serial_comm_utils.h"
 
 #include <stdint.h>
 

@@ -3,3 +3,15 @@ venv/
 .venv/
 
 .vscode/
+
+# Generated files by SerialComm code generator
+include/serial_comm/generated/*
+
+# Defaults structures 
+user_app/common/*
+user_app/event/*
+user_app/mission/*
+user_app/request/*
+
+
+TODO_PLANNER.md

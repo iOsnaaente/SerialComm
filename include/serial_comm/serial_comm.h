@@ -18,13 +18,13 @@
 
 #pragma once
 
-#include "serial_comm_dispatcher.h"
-#include "serial_comm_transport.h"
-#include "serial_comm_watchdog.h"
-#include "serial_comm_protocol.h"
-#include "serial_comm_parser.h"
-#include "serial_comm_utils.h"
-#include "serial_comm_config.h"
+#include "serial_comm/core/serial_comm_dispatcher.h"
+#include "serial_comm/core/serial_comm_transport.h"
+#include "serial_comm/core/serial_comm_watchdog.h"
+#include "serial_comm/core/serial_comm_protocol.h"
+#include "serial_comm/core/serial_comm_parser.h"
+#include "serial_comm/core/serial_comm_utils.h"
+#include "serial_comm/serial_comm_config.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"

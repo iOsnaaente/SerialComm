@@ -5,7 +5,7 @@
  * @date    Created on 26 of May, 2026
  */
 
-#include "serial_comm_watchdog.h"
+#include "serial_comm/core/serial_comm_watchdog.h"
 
 
 bool IRAM_ATTR SerialCommWatchdogTimer::timer_callback(
