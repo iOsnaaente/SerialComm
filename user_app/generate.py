@@ -100,9 +100,19 @@ def snake_case(name: str):
 
 def pascal_case(name: str):
 
+    # IDL identifiers (file stems and field type references) are written
+    # in PascalCase already (RobotState, SetPose, DefaultReturn, ...), not
+    # snake_case. `str.capitalize()` would lowercase the rest of each
+    # segment and mangle them ("RobotState" -> "Robotstate"), breaking the
+    # link between the IDL name, the generated struct name and any
+    # hand-written code that references it. Upper-casing only the first
+    # character of each underscore-separated segment keeps snake_case
+    # inputs working ("robot_state" -> "RobotState") while leaving
+    # already-PascalCase input untouched and the function idempotent.
     return "".join(
-        x.capitalize()
+        x[:1].upper() + x[1:]
         for x in name.split("_")
+        if x
     )
 
 
@@ -142,7 +152,28 @@ def is_custom_type(type_name: str):
 
 def is_dynamic_array(type_name: str):
 
+    # Matches both plain dynamic arrays ("T[]") and bounded arrays
+    # ("T<=N[]"): both are stored and (de)serialized as
+    # SerialCommDynamicArray<T> at runtime, so callers that branch on
+    # "does this field use dynamic-array storage?" should treat them
+    # identically. Use is_bounded_array() when the declared bound
+    # itself matters (e.g. tighter MAX_SERIALIZED_SIZE estimates).
     return re.match(r".+\[\]", type_name) is not None
+
+
+def is_bounded_array(type_name: str):
+
+    return re.match(r".+<=\d+\[\]", type_name) is not None
+
+
+def bounded_array_max_count(type_name: str):
+
+    match = re.search(r"<=(\d+)\[\]", type_name)
+
+    if not match:
+        return None
+
+    return int(match.group(1))
 
 
 def is_fixed_array(type_name: str):
@@ -162,7 +193,7 @@ def fixed_array_size(type_name: str):
 
 def convert_type(type_name: str):
 
-    # FIXED ARRAY
+    # FIXED ARRAY: "T[N]"
     fixed = re.match(r"(.+)\[(\d+)\]", type_name)
 
     if fixed:
@@ -172,7 +203,22 @@ def convert_type(type_name: str):
 
         return f"std::array<{base}, {size}>"
 
-    # DYNAMIC ARRAY
+    # BOUNDED ARRAY: "T<=N[]" — checked before the plain dynamic-array
+    # pattern below, since "(.+)\[\]" would otherwise greedily match the
+    # "<=N" prefix as part of the base type. Bounded arrays still carry
+    # their elements through SerialCommDynamicArray<T> at runtime (there
+    # is no separate fixed-capacity container); the declared bound is
+    # only used to tighten MAX_SERIALIZED_SIZE estimates (see
+    # field_max_size()).
+    bounded = re.match(r"(.+)<=\d+\[\]", type_name)
+
+    if bounded:
+
+        base = convert_type(bounded.group(1))
+
+        return f"SerialCommDynamicArray<{base}>"
+
+    # DYNAMIC ARRAY: "T[]"
     dynamic = re.match(r"(.+)\[\]", type_name)
 
     if dynamic:
@@ -180,15 +226,6 @@ def convert_type(type_name: str):
         base = convert_type(dynamic.group(1))
 
         return f"SerialCommDynamicArray<{base}>"
-
-    # BOUNDED ARRAY
-    bounded = re.match(r"(.+)<=\d+\[\]", type_name)
-
-    if bounded:
-
-        base = convert_type(bounded.group(1))
-
-        return f"DynamicArray<{base}>"
 
     return CPP_TYPE_MAP.get(
         type_name,
@@ -321,7 +358,22 @@ def field_max_size(field):
         base_pascal = pascal_case(base)
         return f"({base_pascal}::MAX_SERIALIZED_SIZE * {count})"
 
-    # DYNAMIC ARRAY
+    # BOUNDED ARRAY: stored as SerialCommDynamicArray<T> (so its size is
+    # technically variable), but the declared "<=N" cap lets us emit a
+    # real worst-case estimate instead of giving up with "0 /* dynamic */":
+    # 2-byte length prefix (see SerialCommBufferWriter::write_dynamic_array)
+    # plus N elements at their max element size.
+    if is_bounded_array(field_type):
+
+        count = bounded_array_max_count(field_type)
+        element_size = (
+            str(TYPE_SIZE_MAP[base]) if base in TYPE_SIZE_MAP
+            else f"{pascal_case(base)}::MAX_SERIALIZED_SIZE"
+        )
+        return f"(sizeof(uint16_t) + ({element_size}) * {count})"
+
+    # DYNAMIC ARRAY (unbounded): true worst case is whatever fits in the
+    # remaining payload, so it cannot contribute a compile-time constant.
     if is_dynamic_array(field_type):
 
         return "0 /* dynamic */"
@@ -525,9 +577,11 @@ def process_struct(path: Path, output_dir: Path):
         "w"
     ) as f:
         f.write(serializer_code)
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_serializer.hpp"'
-        )
+        generated_serializer_includes.append({
+            "name": name,
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_serializer.hpp"'
+        })
     MANIFEST.append({
         "name": name,
         "type": "struct",
@@ -648,12 +702,16 @@ def process_request(path: Path, output_dir: Path):
     ) as f:
 
         f.write(res_serializer)
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_request_serializer.hpp"'
-        )
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_response_serializer.hpp"'
-        )
+        generated_serializer_includes.append({
+            "name": f"{name}_Request",
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_request_serializer.hpp"'
+        })
+        generated_serializer_includes.append({
+            "name": f"{name}_Response",
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_response_serializer.hpp"'
+        })
 
     MANIFEST.append({
         "name": name,
@@ -697,9 +755,11 @@ def process_event(path: Path, output_dir: Path):
     )
     with open( serializer_dir / f"{snake_case(name)}_serializer.hpp", "w" ) as f:
         f.write(serializer_code)
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_serializer.hpp"'
-        )
+        generated_serializer_includes.append({
+            "name": name,
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_serializer.hpp"'
+        })
     MANIFEST.append({
         "name": name,
         "type": "event",
@@ -789,15 +849,21 @@ def process_mission(path: Path, output_dir: Path):
         "w"
     ) as f:
         f.write(feedback_serializer)
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_goal_serializer.hpp"'
-        )
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_result_serializer.hpp"'
-        )
-        generated_serializer_includes.append(
-            f'#include "serial_comm/generated/serializers/{snake_case(name)}_feedback_serializer.hpp"'
-        )
+        generated_serializer_includes.append({
+            "name": f"{name}_Goal",
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_goal_serializer.hpp"'
+        })
+        generated_serializer_includes.append({
+            "name": f"{name}_Result",
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_result_serializer.hpp"'
+        })
+        generated_serializer_includes.append({
+            "name": f"{name}_Feedback",
+            "deps": deps,
+            "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_feedback_serializer.hpp"'
+        })
 
     MANIFEST.append({
         "name": name,
@@ -806,6 +872,60 @@ def process_mission(path: Path, output_dir: Path):
     })
 
     print(f"[GEN] Mission: {name}")
+
+
+# =============================================================================
+# SERIALIZER INCLUDE ORDERING
+# =============================================================================
+def order_serializer_includes(entries):
+    """
+    Topologically sort generated serializer includes so that every type's
+    serializer is emitted only after the serializers of the custom types
+    it embeds as fields.
+
+    This ordering is not cosmetic: every generated serializer specializes
+    the primary `SerialCommSerializer<T>` template (see
+    serial_comm_serializer_base.hpp), which carries a generic fallback
+    body. If `generated_serializers.hpp` `#include`s e.g.
+    "robot_state_serializer.hpp" (RobotState embeds a Pose field) before
+    "pose_serializer.hpp", the compiler implicitly instantiates
+    `SerialCommSerializer<Pose>` from that generic primary template the
+    moment it type-checks `SerialCommSerializer<RobotState>::serialize` --
+    and the explicit specialization for `Pose` encountered afterwards then
+    fails with the cryptic "explicit specialization after instantiation".
+    Plain alphabetical sorting of include paths cannot guarantee this never
+    happens (it depends entirely on how a dependency's name happens to
+    compare to its user's), so the include order has to follow the
+    dependency graph instead. Entries with no ordering constraint between
+    them keep a stable alphabetical order, matching the previous behavior.
+    """
+
+    by_name = { entry["name"]: entry for entry in entries }
+    state = {}
+    ordered = []
+
+    def visit(entry):
+        name = entry["name"]
+        if state.get(name) == "done":
+            return
+        if state.get(name) == "visiting":
+            raise RuntimeError(
+                f"[ERROR] circular type dependency detected involving "
+                f"'{name}' (a fixed-layout C++ struct cannot embed "
+                f"itself, directly or indirectly)"
+            )
+        state[name] = "visiting"
+        for dep in entry["deps"]:
+            dep_entry = by_name.get(dep)
+            if dep_entry is not None:
+                visit(dep_entry)
+        state[name] = "done"
+        ordered.append(entry)
+
+    for entry in sorted(entries, key=lambda e: e["include"]):
+        visit(entry)
+
+    return ordered
 
 
 # =============================================================================
@@ -825,8 +945,8 @@ def generate_manifest(output_dir):
             " */\n\n"
         )
         f.write("#pragma once\n\n")
-        for include in sorted(generated_serializer_includes):
-            f.write(include + "\n")
+        for entry in order_serializer_includes(generated_serializer_includes):
+            f.write(entry["include"] + "\n")
     print("[GEN] Serializer aggregator generated")
 
     with open( output_dir / "manifest.json", "w" ) as f:

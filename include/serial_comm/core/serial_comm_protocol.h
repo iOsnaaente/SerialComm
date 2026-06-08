@@ -167,14 +167,19 @@ public:
 
 
     /**
-     * @brief       Compute packet CRC16
+     * @brief       Compute (or continue) a CRC16-CCITT checksum
      * @param[in]   data Data buffer
      * @param[in]   len Data length
+     * @param[in]   crc Initial/running CRC value. Defaults to the
+     *              algorithm seed (0xFFFF); pass a previous result to
+     *              fold non-contiguous buffers into a single checksum
+     *              without copying them into a scratch buffer first.
      * @return      CRC16 result
      */
     static uint16_t compute_crc16(
         const uint8_t* data,
-        size_t len
+        size_t len,
+        uint16_t crc = 0xFFFF
     );
 
 

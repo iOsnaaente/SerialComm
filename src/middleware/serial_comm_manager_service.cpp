@@ -11,20 +11,15 @@
 static const char* TAG = "SERIAL_COMM_MANAGER_SERVICE";
 
 
-void SerialCommManager::handle_service_request(
+bool SerialCommManager::handle_service_request(
     const SerialCommProtoPacket& packet
 ) {
     auto* entry = this->find_service( packet.header.command );
     if ( entry == nullptr || entry->service == nullptr ) {
-        ESP_LOGW(
-            TAG,
-            "No service handler for command=0x%02X",
-            static_cast<uint8_t>( packet.header.command )
-        );
-        return;
+        return false;
     }
 
-    static SerialCommProtoPacket response;
+    SerialCommProtoPacket response;
     SerialCommProtocol::clear_packet( response );
     errCode res = entry->service->handle_packet( packet, response );
     if ( res != errCode::OK ) {
@@ -34,7 +29,7 @@ void SerialCommManager::handle_service_request(
             static_cast<uint8_t>( packet.header.command ),
             err_to_str( res )
         );
-        return;
+        return true;
     }
 
     if ( this->cfg_.enable_auto_reply ) {
@@ -48,6 +43,7 @@ void SerialCommManager::handle_service_request(
             );
         }
     }
+    return true;
 }
 
 
@@ -66,17 +62,4 @@ SerialCommManager::ServiceEntry* SerialCommManager::find_service(
     }
     xSemaphoreGive( this->registry_mutex_ );
     return nullptr;
-}
-
-
-bool SerialCommManager::is_service_command( Command command ) const {
-    for ( size_t i = 0; i < MAX_SERVICES; i++ ) {
-        if (
-            this->services_[i].used &&
-            this->services_[i].command == command
-        ) {
-            return true;
-        }
-    }
-    return false;
 }

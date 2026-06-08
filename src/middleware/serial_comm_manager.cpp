@@ -203,39 +203,18 @@ void SerialCommManager::clear_registries() {
 }
 
 
-errCode SerialCommManager::send_reply(
-    Command command,
-    uint16_t seq_id,
-    const uint8_t* payload,
-    size_t payload_len
-) {
-    SerialCommProtoPacket packet;
-    errCode err = build_packet(
-            make_reply(command), seq_id, payload, payload_len, packet
-        );
-    if ( err != errCode::OK ) {
-        return err;
-    }
-    return this->serial_->send( packet );
-}
-
-
-
 void SerialCommManager::route_packet( const SerialCommProtoPacket& packet ) {
     if ( is_reply( packet.header.command ) ) {
         this->handle_reply(packet);
         return;
     }
-    if ( this->is_service_command( packet.header.command ) ) {
-        this->handle_service_request(packet);
+    if ( this->handle_service_request( packet ) ) {
         return;
     }
-    if ( this->is_topic_command( packet.header.command ) ) {
-        this->handle_topic_message( packet );
+    if ( this->handle_topic_message( packet ) ) {
         return;
     }
-    if ( this->is_action_command( packet.header.command ) ) {
-        this->handle_action_packet( packet );
+    if ( this->handle_action_packet( packet ) ) {
         return;
     }
     ESP_LOGW(
@@ -246,7 +225,11 @@ void SerialCommManager::route_packet( const SerialCommProtoPacket& packet ) {
 }
 
 
-void SerialCommManager::handle_topic_message( const SerialCommProtoPacket& packet ) {
+bool SerialCommManager::handle_topic_message( const SerialCommProtoPacket& packet ) {
+    auto* entry = find_topic( packet.header.command );
+    if ( entry == nullptr || entry->topic == nullptr ) {
+        return false;
+    }
     ESP_LOGD(
         TAG,
         "Topic packet received: cmd=0x%02X seq=%u len=%u",
@@ -254,19 +237,19 @@ void SerialCommManager::handle_topic_message( const SerialCommProtoPacket& packe
         packet.header.seq_id,
         packet.header.payload_len
     );
-    auto* entry = find_topic( packet.header.command );
-    if ( entry == nullptr || entry->topic == nullptr ) {
-        ESP_LOGW(TAG, "No topic handler for command=0x%02X", static_cast<uint8_t>( packet.header.command ));
-        return;
-    }
     errCode res = entry->topic->handle_packet( packet );
     if ( res != errCode::OK ) {
         ESP_LOGW(TAG, "Topic handler failed: cmd=0x%02X err=%s", static_cast<uint8_t>(packet.header.command), err_to_str(res));
     }
+    return true;
 }
 
 
-void SerialCommManager::handle_action_packet( const SerialCommProtoPacket& packet ) {
+bool SerialCommManager::handle_action_packet( const SerialCommProtoPacket& packet ) {
+    auto* entry = find_action( packet.header.command );
+    if ( entry == nullptr || entry->action == nullptr ) {
+        return false;
+    }
     ESP_LOGD(
         TAG,
         "Action packet received: cmd=0x%02X seq=%u len=%u",
@@ -274,20 +257,11 @@ void SerialCommManager::handle_action_packet( const SerialCommProtoPacket& packe
         packet.header.seq_id,
         packet.header.payload_len
     );
-    auto* entry = find_action( packet.header.command );
-    if ( entry == nullptr || entry->action == nullptr ) {
-        ESP_LOGW(TAG, "No action handler for command=0x%02X", static_cast<uint8_t>( packet.header.command ));
-        return;
-    }
     errCode res = entry->action->handle_packet( packet );
     if ( res != errCode::OK ) {
         ESP_LOGW(TAG, "Action handler failed: cmd=0x%02X err=%s", static_cast<uint8_t>(packet.header.command), err_to_str(res));
     }
-}
-
-
-void SerialCommManager::handle_request( const SerialCommProtoPacket& packet ) {
-    ESP_LOGD(TAG, "handle_request called for cmd=0x%02X (not implemented fully)", static_cast<uint8_t>(packet.header.command));
+    return true;
 }
 
 

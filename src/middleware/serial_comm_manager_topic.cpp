@@ -24,16 +24,3 @@ SerialCommManager::TopicEntry* SerialCommManager::find_topic(
     xSemaphoreGive( this->registry_mutex_ );
     return nullptr;
 }
-
-
-bool SerialCommManager::is_topic_command( Command command ) const {
-    for ( size_t i = 0; i < MAX_TOPICS; i++ ) {
-        if (
-            this->topics_[i].used &&
-            this->topics_[i].command == command
-        ) {
-            return true;
-        }
-    }
-    return false;
-}

@@ -41,14 +41,14 @@ user_app/
 │   ├── Pose.struct
 │   └── DefaultReturn.struct
 │
-├── generated/
-│   ├── event/
-│   ├── request/
-│   ├── mission/
-│   └── struct/
-│
 └── generate.py
 ```
+
+Note: generated C++ output is **not** written inside `user_app/`. It is written to
+`include/serial_comm/generated/` at the component root (see "Code Generation" below),
+so the generated headers sit alongside the rest of the public component API and are
+reachable through the component's existing `include` directory without any extra
+include-path configuration.
 
 ## What is a Struct?
 
@@ -406,51 +406,47 @@ The generator parses all IDL files and creates C++ structures automatically.
 Generated files are stored in:
 
 ```text
-user_app/generated/
+include/serial_comm/generated/
 ```
+
+Because this path already lives under the component's public `include/` directory,
+generated headers are reachable as `serial_comm/generated/...` without any extra
+include-path configuration.
 
 Generated components include:
 
-* structures;
-* serializers;
-* deserializers;
-* metadata;
-* middleware bindings.
+* structures, grouped under `struct/`, `event/`, `request/` and `mission/`;
+* `SerialCommSerializer<T>` specializations, grouped under `serializers/`;
+* an aggregator header (`generated_serializers.hpp`) that includes every
+  specialization in dependency order (see "Serializer System" in the
+  [component README](../README.md#serializer-system));
+* a `manifest.json` listing every generated type with its kind (struct/event/
+  request/mission) and packet `id`.
 
 ## Running the Generator
 
-Example:
+`--input` and `--output` are both required (the generator does not assume defaults).
+Run it from the component root:
 
 ```bash
-python user_app/generate.py
+python user_app/generate.py --input user_app --output include/serial_comm/generated
 ```
 
 ## Build System Integration
 
-The generator should run automatically during the build process.
+The generator already runs automatically as part of this component's build — see the
+"CODE GENERATION" block in the component's [`CMakeLists.txt`](../CMakeLists.txt).
 
-Example `CMakeLists.txt` integration:
+In short, the build:
 
-```cmake
-add_custom_command(
-    OUTPUT generated_stamp
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/user_app/generate.py
-    COMMAND ${CMAKE_COMMAND} -E touch generated_stamp
-)
+1. creates `include/serial_comm/generated/` (and a scratch dir under
+   `${CMAKE_CURRENT_BINARY_DIR}`) if they don't exist;
+2. invokes `generate.py --input <component>/user_app --output <component>/include/serial_comm/generated`;
+3. touches a `generated.stamp` file so CMake can track the custom command's output and
+   skip regeneration when no `.struct`/`.event`/`.request`/`.mission`/`generate.py` file
+   changed;
+4. registers a `serial_comm_codegen` custom target depended on by the component library,
+   so generation always completes before compilation starts.
 
-add_custom_target(
-    serialcomm_codegen
-    DEPENDS generated_stamp
-)
-
-add_dependencies(
-    ${COMPONENT_LIB}
-    serialcomm_codegen
-)
-
-target_include_directories(
-    ${COMPONENT_LIB}
-    PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/user_app/generated
-)
-```
+No `target_include_directories` step is needed: the generated tree lives inside the
+`include` directory that `idf_component_register` already exposes.

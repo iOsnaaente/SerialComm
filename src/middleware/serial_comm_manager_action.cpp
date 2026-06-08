@@ -7,19 +7,6 @@
 
 #include "serial_comm/middleware/serial_comm_manager.h"
 
-bool SerialCommManager::is_action_command( Command command ) const {
-    for ( size_t i = 0; i < MAX_ACTIONS; i++ ) {
-        if (
-            this->actions_[i].used &&
-            this->actions_[i].command == command
-        ) {
-            return true;
-        }
-    }
-    return false;
-}
-
-
 SerialCommManager::ActionEntry* SerialCommManager::find_action(
     Command command
 ) {

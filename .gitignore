@@ -1,6 +1,9 @@
 build/
 venv/
 .venv/
+.claude/
+__pycache__/
+*.pyc
 
 .vscode/
 
@@ -12,6 +15,7 @@ user_app/common/*
 user_app/event/*
 user_app/mission/*
 user_app/request/*
+user_app/struct/*
 
 
 TODO_PLANNER.md

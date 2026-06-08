@@ -229,7 +229,7 @@ class SerialCommManager {
             Command command,
             const Req& request,
             Res& response,
-            uint32_t timeout_ms = portMAX_DELAY
+            uint32_t timeout_ms = SerialCommConfig::TRANSACTION_TIMEOUT_MS
         ) {
             uint8_t payload[ SERIAL_COMM_MAX_PAYLOAD ];
             size_t payload_size = 0;
@@ -448,12 +448,6 @@ class SerialCommManager {
         void route_packet( const SerialCommProtoPacket& packet );
 
         /**
-         * @brief   Handle request packet
-         * @param   packet Incoming request packet
-         */
-        void handle_request( const SerialCommProtoPacket& packet );
-
-        /**
          * @brief   Handle reply packet
          * @param   packet Incoming reply packet
          */
@@ -486,37 +480,7 @@ class SerialCommManager {
             SerialCommProtoPacket& out_packet
         );
 
-        /**
-         * @brief   Send reply packet
-         * @param   command Service command ID
-         * @param   seq_id Sequence ID to reply to
-         * @param   payload Payload data
-         * @param   payload_len Payload length
-         * @return  Result code
-         */
-        errCode send_reply(
-            Command command,
-            uint16_t seq_id,
-            const uint8_t* payload,
-            size_t payload_len
-        );
-
-        /**
-         * @brief   Service send reply message helper
-         * @tparam  Res Response type
-         * @param   command Service command ID
-         * @param   seq_id Sequence ID to reply to
-         * @param   response Response object to serialize and send
-         * @return  Result code
-         */
-        template< typename Res >
-        errCode send_reply_message(
-            Command command,
-            uint16_t seq_id,
-            const Res& response
-        );
-
-    // HELPERS 
+    // HELPERS
     private:
     
         /**
@@ -544,33 +508,6 @@ class SerialCommManager {
 
 
         /**
-         * @brief   Check if command ID corresponds to a service
-         * @param   command Command ID
-         * @return  True if it's a service command
-         * @result  False if it's not a service command 
-         */
-        bool is_service_command( Command command ) const;
-        
-        
-        /**
-         * @brief   Check if command ID corresponds to a topic
-         * @param   command Command ID
-         * @return  True if it's a topic command
-         * @result  False if it's not a topic command
-         */
-        bool is_topic_command( Command command ) const;
-        
-
-        /**
-         * @brief   Check if command ID corresponds to an action
-         * @param   command Command ID
-         * @return  True if it's an action command
-         * @result  False if it's not an action command
-         */
-        bool is_action_command( Command command ) const;
-
-
-        /**
          * @brief   Clear all service, topic and action registries
          */
         void clear_registries();
@@ -578,24 +515,30 @@ class SerialCommManager {
 
     // ROUTERS
     private:
-    
+
         /**
-         * @brief   Route service request packet
+         * @brief   Look up and run the service handler for a request packet
          * @param   packet Incoming service request packet
+         * @return  true if a registered service handled the packet,
+         *          false if no service is registered for its command
          */
-        void handle_service_request( const SerialCommProtoPacket& packet );
+        bool handle_service_request( const SerialCommProtoPacket& packet );
 
         /**
-         * @brief   Route topic message packet
+         * @brief   Look up and run the topic handler for a message packet
          * @param   packet Incoming topic message packet
+         * @return  true if a registered topic handled the packet,
+         *          false if no topic is registered for its command
          */
-        void handle_topic_message( const SerialCommProtoPacket& packet );
+        bool handle_topic_message( const SerialCommProtoPacket& packet );
 
         /**
-         * @brief   Route action goal/feedback/result packet
+         * @brief   Look up and run the action handler for a goal/feedback/result packet
          * @param   packet Incoming action packet
+         * @return  true if a registered action handled the packet,
+         *          false if no action is registered for its command
          */
-        void handle_action_packet( const SerialCommProtoPacket& packet );
+        bool handle_action_packet( const SerialCommProtoPacket& packet );
 
 
     // GETTERS
