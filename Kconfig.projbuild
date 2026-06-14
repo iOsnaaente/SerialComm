@@ -211,8 +211,52 @@ menu "SerialComm Middleware"
             int "UART Task Core"
             range -1 1
             default -1
-            help 
+            help
                 CPU core affinity for the UART task. Set to -1 for no affinity.
+
+    endmenu
+
+
+    menu "ESP-NOW Transport"
+
+        config SERIAL_COMM_ESPNOW_QUEUE_SIZE
+            int "ESP-NOW RX Queue Size"
+            range 4 64
+            default 16
+            help
+                Number of raw ESP-NOW frames that can be queued before the
+                reassembly task processes them.  Increase if RX frames are
+                dropped under burst traffic.
+
+        config SERIAL_COMM_ESPNOW_TASK_STACK_SIZE
+            int "ESP-NOW RX Task Stack Size"
+            range 2048 16384
+            default 4096
+            help
+                Stack size for the ESP-NOW reassembly and dispatch task.
+
+        config SERIAL_COMM_ESPNOW_TASK_PRIORITY
+            int "ESP-NOW RX Task Priority"
+            range 1 10
+            default 5
+            help
+                FreeRTOS priority for the ESP-NOW RX task.
+
+        config SERIAL_COMM_ESPNOW_TASK_CORE
+            int "ESP-NOW RX Task Core"
+            range -1 1
+            default -1
+            help
+                CPU core affinity for the ESP-NOW RX task.
+                Set to -1 for no affinity (scheduler decides).
+
+        config SERIAL_COMM_ESPNOW_TX_TIMEOUT_MS
+            int "ESP-NOW TX Timeout (ms)"
+            range 50 5000
+            default 200
+            help
+                Maximum time to wait for the ESP-NOW send-done callback
+                after each fragment is transmitted.
 
     endmenu
 

@@ -193,4 +193,51 @@ namespace SerialCommConfig {
     constexpr int UART_TASK_CORE =
         CONFIG_SERIAL_COMM_UART_TASK_CORE;
 
+
+    // -----------------------------------------------------------------------
+    // ESP-NOW TRANSPORT
+    // -----------------------------------------------------------------------
+
+    constexpr size_t ESPNOW_RX_QUEUE_SIZE =
+        #ifdef CONFIG_SERIAL_COMM_ESPNOW_QUEUE_SIZE
+            CONFIG_SERIAL_COMM_ESPNOW_QUEUE_SIZE;
+        #else
+            16;
+        #endif
+
+    constexpr size_t ESPNOW_TASK_STACK_SIZE =
+        #ifdef CONFIG_SERIAL_COMM_ESPNOW_TASK_STACK_SIZE
+            CONFIG_SERIAL_COMM_ESPNOW_TASK_STACK_SIZE;
+        #else
+            4096;
+        #endif
+
+    constexpr uint32_t ESPNOW_TASK_PRIORITY =
+        #ifdef CONFIG_SERIAL_COMM_ESPNOW_TASK_PRIORITY
+            CONFIG_SERIAL_COMM_ESPNOW_TASK_PRIORITY;
+        #else
+            5;
+        #endif
+
+    constexpr int ESPNOW_TASK_CORE =
+        #ifdef CONFIG_SERIAL_COMM_ESPNOW_TASK_CORE
+            CONFIG_SERIAL_COMM_ESPNOW_TASK_CORE;
+        #else
+            -1;
+        #endif
+
+    constexpr uint32_t ESPNOW_TX_TIMEOUT_MS =
+        #ifdef CONFIG_SERIAL_COMM_ESPNOW_TX_TIMEOUT_MS
+            CONFIG_SERIAL_COMM_ESPNOW_TX_TIMEOUT_MS;
+        #else
+            200;
+        #endif
+
+    constexpr bool ESPNOW_USE_TASK_CORE_AFINITY =
+    #if defined(CONFIG_SERIAL_COMM_ESPNOW_TASK_CORE) && CONFIG_SERIAL_COMM_ESPNOW_TASK_CORE >= 0
+        true;
+    #else
+        false;
+    #endif
+
 }
