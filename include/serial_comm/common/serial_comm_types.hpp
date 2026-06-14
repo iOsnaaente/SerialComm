@@ -7,6 +7,7 @@
 
 #include <type_traits>
 #include <stdint.h>
+#include <stddef.h>
 #include <array>
 
 
