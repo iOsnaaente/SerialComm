@@ -20,6 +20,7 @@
 #pragma once
 
 
+#include "serial_comm/common/serial_comm_types.hpp"
 #include "serial_comm/messages/serial_comm_messages.h"
 #include "serial_comm/serial_comm_config.h"
 #include "serial_comm/core/serial_comm_protocol.h"
@@ -69,7 +70,7 @@ class SerialCommManager {
                 : 1;
 
     // Service, Topic and Action registries
-    private: 
+    private:
         struct ServiceEntry {
             bool used = false;
             Command command = static_cast<Command>(0);
@@ -86,15 +87,32 @@ class SerialCommManager {
             IActionBase* action = nullptr;
         };
 
+        /**
+         * @brief   Retained (last-value cache) slot — one per @retain type.
+         *          Populated automatically by create_subscription<Msg>() when
+         *          Msg::RETAIN == true, then updated on every received packet.
+         */
+        struct RetainedEntry {
+            bool     registered  = false; ///< command is marked as retained
+            bool     has_payload = false; ///< at least one message received
+            Command  command     = static_cast<Command>(0);
+            uint8_t  payload[SERIAL_COMM_MAX_PAYLOAD] = {};
+            size_t   len         = 0;
+        };
+
+        static constexpr size_t MAX_RETAINED = 8;
+
     private:
-        ServiceEntry services_[ MAX_SERVICES ];
-        TopicEntry topics_[ MAX_TOPICS ];
-        ActionEntry actions_[ MAX_ACTIONS ];
+        ServiceEntry  services_[ MAX_SERVICES ];
+        TopicEntry    topics_[ MAX_TOPICS ];
+        ActionEntry   actions_[ MAX_ACTIONS ];
+        RetainedEntry retained_[ MAX_RETAINED ];
 
     
     private:
         SerialCommTransactionManager transactions_;
-        SemaphoreHandle_t registry_mutex_ = nullptr;
+        SemaphoreHandle_t registry_mutex_  = nullptr;
+        SemaphoreHandle_t retained_mutex_  = nullptr;
 
 
     public:
@@ -229,7 +247,9 @@ class SerialCommManager {
             Command command,
             const Req& request,
             Res& response,
-            uint32_t timeout_ms = SerialCommConfig::TRANSACTION_TIMEOUT_MS
+            uint32_t timeout_ms = serial_comm_timeout_ms<Req>(
+                SerialCommConfig::TRANSACTION_TIMEOUT_MS
+            )
         ) {
             uint8_t payload[ SERIAL_COMM_MAX_PAYLOAD ];
             size_t payload_size = 0;
@@ -262,7 +282,7 @@ class SerialCommManager {
                 return err;
             }
 
-            err = this->serial_->send( request_packet );
+            err = this->serial_->send( request_packet, serial_comm_delivery_mode<Req>() );
             if ( err != errCode::OK ) {
                 return err;
             }
@@ -346,6 +366,10 @@ class SerialCommManager {
                     this->topics_[i].command = subscription->command();
                     this->topics_[i].topic = subscription;
                     xSemaphoreGive( this->registry_mutex_ );
+                    /* @retain: register command in last-value cache */
+                    if constexpr (serial_comm_retain<Msg>()) {
+                        mark_retained( subscription->command() );
+                    }
                     return errCode::OK;
                 }
             }
@@ -386,7 +410,7 @@ class SerialCommManager {
             if ( err != errCode::OK ) {
                 return err;
             }
-            return this->serial_->send( packet );
+            return this->serial_->send( packet, serial_comm_delivery_mode<Msg>() );
         }
 
 
@@ -425,6 +449,52 @@ class SerialCommManager {
             }
             xSemaphoreGive( this->registry_mutex_ );
             return errCode::ERR_NO_MEMORY;
+        }
+
+
+    // RETAIN — last-value cache
+    public:
+
+        /**
+         * @brief   Retrieve the last received payload for a @retain message type.
+         * @tparam  Msg  IDL type with RETAIN == true.
+         * @param   command  Command ID the message is published on.
+         * @param   msg      Output: deserialized last known message.
+         * @return  true if a retained payload exists and was deserialized.
+         * @return  false if no message has been received yet, or the
+         *          command is not registered as retained.
+         *
+         * @note    Thread-safe.  Returns a snapshot copy.
+         *
+         * Usage:
+         * @code
+         *   RobotTelemetry tel;
+         *   if (mgr.get_last<RobotTelemetry>(TEL_CMD, tel)) {
+         *       // use tel
+         *   }
+         * @endcode
+         */
+        template<typename Msg>
+        bool get_last( Command command, Msg& msg ) {
+            if ( retained_mutex_ == nullptr ) {
+                return false;
+            }
+            if ( xSemaphoreTake( retained_mutex_, pdMS_TO_TICKS(10) ) != pdTRUE ) {
+                return false;
+            }
+            for ( size_t i = 0; i < MAX_RETAINED; i++ ) {
+                auto& e = retained_[i];
+                if ( e.registered && e.command == command && e.has_payload ) {
+                    uint8_t tmp[SERIAL_COMM_MAX_PAYLOAD];
+                    size_t  tmp_len = e.len;
+                    memcpy( tmp, e.payload, tmp_len );
+                    xSemaphoreGive( retained_mutex_ );
+                    size_t consumed = 0;
+                    return Serializer<Msg>::deserialize( tmp, tmp_len, msg, &consumed );
+                }
+            }
+            xSemaphoreGive( retained_mutex_ );
+            return false;
         }
 
 
@@ -480,9 +550,24 @@ class SerialCommManager {
             SerialCommProtoPacket& out_packet
         );
 
+    // RETAIN HELPERS
+    private:
+
+        /**
+         * @brief   Register a command as retained (called from create_subscription).
+         */
+        void mark_retained( Command command );
+
+        /**
+         * @brief   Store the packet payload in the retained cache if the command
+         *          is registered as retained.  Called from handle_topic_message().
+         */
+        void store_if_retained( const SerialCommProtoPacket& packet );
+
+
     // HELPERS
     private:
-    
+
         /**
          * @brief   Find service entry by command ID
          * @param   command Service command ID

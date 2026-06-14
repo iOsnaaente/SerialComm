@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "serial_comm/common/serial_comm_types.hpp"
 #include "serial_comm/core/serial_comm_dispatcher.h"
 #include "serial_comm/core/serial_comm_transport.h"
 #include "serial_comm/core/serial_comm_watchdog.h"
@@ -156,10 +157,15 @@ class SerialComm {
 
         /**
          * @brief   Send packet through transport
-         * @param   packet Packet to send
+         * @param   packet  Packet to send
+         * @param   mode    BEST_EFFORT → write_async (no ACK wait);
+         *                  RELIABLE    → write (waits for transport ACK)
          * @return  Middleware result
          */
-        errCode send( const SerialCommProtoPacket& packet );
+        errCode send(
+            const SerialCommProtoPacket& packet,
+            DeliveryMode mode = DeliveryMode::BEST_EFFORT
+        );
 
         /**
          * @brief   Register command callback

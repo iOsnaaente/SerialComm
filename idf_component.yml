@@ -1,12 +1,14 @@
-version: "0.2.6-beta"
+version: "0.3.2-beta"
 
 description: >
   Serial communication middleware for ESP-IDF with
   services, topics, actions and transaction support.
 
   A lightweight, extensible middleware component for ESP-IDF that provides
-  a structured communication framework inspired by ROS2 and micro-ROS 
-  semantics. 
+  a structured communication framework inspired by ROS2 and micro-ROS
+  semantics. Includes a Python client library, an IDL code generator,
+  ESP-NOW and composite multi-transport support, and a full decorator
+  system for per-type delivery, rate, retain and versioning semantics.
 
 url: "https://github.com/iOsnaaente/SerialComm"
 
@@ -16,33 +18,303 @@ dependencies:
 
 planned:
 
-  - version: "0.3.x"
+  - version: "0.4.x"
     description: >
-      Alpha release with initial Wi-Fi transport support and middleware
-      abstraction layer.
+      Alpha release with initial Wi-Fi transport support and service
+      discovery mechanism.
 
     features:
       - Wi-Fi transport support
       - Bluetooth transport support
-      - ROS-like service/topic/action API
       - Service discovery mechanism
       - Middleware security features
       - Enhanced logging and diagnostics
 
     breakpoints:
       - "Added Wi-Fi transport implementation"
-      - "Introduced middleware abstraction layer"
-      - "Implemented ROS-like communication semantics"
-      - "Added generic serialization API"
+      - "Introduced service discovery layer"
+      - "Added transport-level encryption support"
 
 
 roadmap:
 
 
+  - version: "0.3.2"
+    description: >
+      Extended the IDL decorator system with five new annotations:
+      @timeout_ms, @version, @deprecated, @retain and @max_rate_hz.
+      Each decorator maps to a static constexpr member in the generated
+      C++ struct and is consumed by either the firmware middleware or the
+      Python client — with zero boilerplate at the call site.
+
+      The @retain mechanism introduces a last-value cache in
+      SerialCommManager: when a subscription is created for a @retain
+      type, every received packet is stored in a fixed-size table
+      (MAX_RETAINED = 8 slots) and can be retrieved at any time with
+      get_last<Msg>(). The Python client mirrors this with set_retain()
+      and get_last(). The @max_rate_hz decorator is enforced in Python's
+      publish() call: packets that arrive faster than the declared ceiling
+      are silently dropped with ERR_BUSY without touching the serial port.
+      The @deprecated decorator emits a standard C++17 [[deprecated]]
+      attribute before the struct definition so the compiler warns on
+      every use site, with no runtime cost.
+
+    features:
+      - "@timeout_ms N — per-type call_service timeout via TIMEOUT_MS constexpr"
+      - "@version N — schema versioning via SCHEMA_VERSION constexpr"
+      - "@deprecated — [[deprecated(...)]] C++17 attribute emitted before struct"
+      - "@retain — last-value cache in SerialCommManager; get_last<Msg>() API"
+      - "@max_rate_hz N — MAX_RATE_HZ constexpr; Python publish() rate limiter"
+      - "serial_comm_timeout_ms<T>(default) C++17 trait for timeout fallback"
+      - "serial_comm_retain<T>() C++17 trait consumed by create_subscription"
+      - "RetainedEntry table in SerialCommManager (mutex-protected, 8 slots)"
+      - "store_if_retained() called in handle_topic_message() before dispatch"
+      - "Python set_rate_limit(cmd, hz) / set_retain(cmd) / get_last(cmd)"
+      - "generated_constants.py mirrors all decorator values for the Python side"
+      - "LegacyStatus.event added as a @deprecated example"
+
+    breakpoints:
+      - "Added @timeout_ms: TIMEOUT_MS constexpr consumed by serial_comm_timeout_ms<T>()"
+      - "Added @version: SCHEMA_VERSION constexpr for compatibility checks"
+      - "Added @deprecated: [[deprecated(...)]] attribute placed before struct definition"
+      - "Added @retain: RETAIN constexpr + RetainedEntry cache in SerialCommManager"
+      - "Added @max_rate_hz: MAX_RATE_HZ constexpr + Python rate limiter in publish()"
+      - "handle_topic_message() now calls store_if_retained() before subscriber dispatch"
+      - "Python _dispatch() mirrors retain cache for host-side get_last()"
+      - "generated_constants.py auto-documents all command IDs and decorator values"
+
+
+  - version: "0.3.1"
+    description: >
+      Introduced a delivery mode decorator system for IDL files. Every
+      .event, .request and .mission file can now declare @best_effort
+      (fire-and-forget, default) or @reliable (wait for link-layer
+      confirmation). The mode is encoded in the generated struct as a
+      static constexpr DeliveryMode member and is read automatically by
+      publish<Msg>() and call_service<Req,Res>() through a C++17
+      std::void_t trait — no call-site changes needed.
+
+      On the firmware, RELIABLE routes through transport_->write() which
+      blocks until the UART TX FIFO drains or until the ESP-NOW send-done
+      callback confirms delivery. BEST_EFFORT routes through
+      transport_->write_async() which returns immediately. The Python
+      client exposes the same enum and flushes the OS serial TX buffer
+      when RELIABLE is requested.
+
+    features:
+      - "DeliveryMode enum (BEST_EFFORT=0, RELIABLE=1) in serial_comm_types.hpp"
+      - "SerialCommHasDeliveryMode<T> trait with std::void_t detection"
+      - "serial_comm_delivery_mode<T>() constexpr with BEST_EFFORT fallback"
+      - "SerialComm::send() overload accepts DeliveryMode parameter"
+      - "RELIABLE: transport_->write() — UART drains TX FIFO; ESP-NOW checks ACK"
+      - "BEST_EFFORT: transport_->write_async() — fire and forget on all transports"
+      - "generate.py: parse_metadata() normalises @reliable/@best_effort"
+      - "generate_struct() emits DELIVERY_MODE constexpr for events/requests/missions"
+      - "Embedded structs (e.g. GpsCoord) do not receive DELIVERY_MODE"
+      - "Python DeliveryMode IntEnum exported in __init__.py"
+      - "Python publish() accepts delivery_mode=DeliveryMode.BEST_EFFORT"
+      - "Python call_service() always flushes (equivalent to RELIABLE on UART)"
+
+    breakpoints:
+      - "Defined DeliveryMode enum and C++17 detection trait in serial_comm_types.hpp"
+      - "Added DeliveryMode parameter to SerialComm::send()"
+      - "Routed RELIABLE through write() and BEST_EFFORT through write_async()"
+      - "Extended generate.py to parse and emit DELIVERY_MODE constexpr"
+      - "Exported DeliveryMode to Python and wired into publish()"
+
+    design decisions:
+      - The DeliveryMode is read from the type, not the call site, to
+        guarantee that IDL-declared semantics are always honoured without
+        requiring every publish call to repeat the intent. Types without
+        DELIVERY_MODE fall back to BEST_EFFORT, so hand-written types
+        are compatible without modification.
+      - Routing through the existing write()/write_async() split avoids
+        any change to the three transport implementations (UART, ESP-NOW,
+        MultiTransport); they already encoded the correct blocking
+        behaviour in those two methods.
+
+
+  - version: "0.3.0"
+    description: >
+      Performance analysis of the VSSS bridge at 921600 baud with three
+      robots at a 30ms cycle time, followed by three concrete fixes.
+      The UART bus utilisation was measured at 5.75% — well within margin
+      — and the real bottleneck identified as ESP-NOW unicast latency
+      (2-5ms per packet x 6 packets per cycle ≈ 12-30ms). Three issues
+      were found and corrected: the Kconfig baud range was capped at
+      1 Mbaud despite ESP32 hardware supporting ~3.5 Mbaud; the Python
+      client's serial.timeout of 5ms added artificial per-packet RX
+      latency; and the VSSSController defaulted to 115200 baud while the
+      firmware already defaulted to 921600.
+
+    features:
+      - "Kconfig baud range extended from 1000000 to 5000000 (unlocks ~3.5 Mbaud)"
+      - "serial_comm_py read_timeout reduced from 0.005s to 0.001s (1ms cap)"
+      - "VSSSController default baudrate corrected from 115200 to 921600"
+      - "Bandwidth analysis table documented (5300 B/s used of 92160 B/s available)"
+      - "ESP-NOW unicast bottleneck identified and documented"
+      - "Runtime saturation detection guide: crc_errors, parser_resets, timeouts"
+
+    breakpoints:
+      - "Kconfig.projbuild range 9600 1000000 changed to range 9600 5000000"
+      - "serial_comm_py/client.py read_timeout parameter defaulted to 0.001"
+      - "serial_comm_py/vsss_controller.py default baudrate corrected to 921600"
+
+    troubleshooting:
+      - issue: "parser_resets counter growing despite valid data"
+        solution: >
+          The inter-byte timeout threshold (37.97 µs at 921600 baud) is
+          below the OS scheduler tick (~1 ms). This is not a problem for
+          continuous UART streams but may fire falsely on bursty traffic.
+          Disable with inter_byte_timeout_chars=0 in SerialCommClient.
+      - issue: "Increasing crc_errors at high throughput"
+        solution: >
+          Indicates UART RX buffer overflow or line noise. Check that
+          CONFIG_SERIAL_COMM_UART_RX_BUFFER_SIZE is large enough for peak
+          burst size and that the cable length/shielding is adequate.
+
+
+  - version: "0.2.9"
+    description: >
+      Added the VSSS (Very Small Size Soccer) bridge example as a
+      reference implementation of a full multi-node ESP-NOW system. Two
+      new IDL event types (RobotVelocityCmd and RobotTelemetry) were
+      defined and generated. A complete bridge firmware example
+      (vsss_espnow_bridge) covers all four node roles selected at compile
+      time via NODE_TYPE. A transparent UART-to-ESP-NOW relay example
+      (uart_to_espnow_bridge) was also added. All four examples had their
+      CMakeLists.txt build system fixed to use a local components symlink
+      instead of EXTRA_COMPONENT_DIRS pointing to the home directory.
+
+    features:
+      - "RobotVelocityCmd.event (@id 0x10): robot_id, vl, vr"
+      - "RobotTelemetry.event (@id 0x11): robot_id, ax, ay, gz, vl_measured, vr_measured, ball_detected"
+      - "vsss_espnow_bridge: single file, four roles via NODE_TYPE 0/1/2/3"
+      - "Bridge (NODE_TYPE 0): dual SerialComm stacks (UART + ESP-NOW)"
+      - "Bridge: unicast RobotVelocityCmd to target robot MAC via set_tx_peer()"
+      - "Bridge: forwards RobotTelemetry from any robot to PC via UART"
+      - "Robot nodes: 20Hz telemetry loop, robot_id filtering on velocity commands"
+      - "uart_to_espnow_bridge: relay UART SensorReading to ESP-NOW; local SetMotor service"
+      - "ESP-NOW broadcast mode via USE_BROADCAST define (no add_peer needed)"
+      - "CMakeLists.txt: EXTRA_COMPONENT_DIRS replaced by local components/SerialComm symlink"
+
+    breakpoints:
+      - "Defined RobotVelocityCmd and RobotTelemetry IDL event types"
+      - "Implemented vsss_espnow_bridge with compile-time node role selection"
+      - "Implemented uart_to_espnow_bridge transparent relay example"
+      - "Fixed CMake build to use local component symlink across all four examples"
+      - "Introduced ESP-NOW peer registration pattern and set_tx_peer() routing"
+
+    troubleshooting:
+      - issue: "ESP-NOW TX fails after set_tx_peer() with unknown peer error"
+        solution: >
+          add_peer() must be called for every unicast MAC before any
+          transmission. The bridge registers all three robot MACs at
+          startup. Ensure ROBOT_MACS[] and BRIDGE_MAC are filled in
+          with real hardware addresses before flashing.
+
+
+  - version: "0.2.8"
+    description: >
+      Introduced serial_comm_py, a pure-Python implementation of the
+      SerialComm protocol stack that mirrors the firmware architecture
+      module for module. The library provides the same publish/subscribe,
+      service call, and ping primitives as SerialCommManager on the
+      firmware side, running over a standard pyserial port. A background
+      daemon thread handles all RX parsing and dispatches packets to
+      registered callbacks without blocking the calling thread.
+      An optional Numba JIT-compiled CRC16 is used when numba is
+      available, with a pure-Python fallback.
+
+    features:
+      - "_types.py: Command, Packet, ResultCode, DeliveryMode, protocol constants"
+      - "_crc.py: CRC16-CCITT with optional Numba @njit JIT, pure-Python fallback"
+      - "_protocol.py: encode_packet() / decode_packet() frame helpers"
+      - "_parser.py: StreamParser state machine mirroring firmware SerialCommParser"
+      - "client.py: SerialCommClient with background RX thread and TX mutex"
+      - "client.py: publish(), subscribe(), call_service(), serve(), ping()"
+      - "client.py: inter-byte timeout mirroring firmware watchdog (3.5 × byte_time)"
+      - "client.py: RX/TX statistics counters (tx_packets, rx_packets, crc_errors)"
+      - "vsss_controller.py: VSSSController high-level API for the VSSS bridge"
+      - "vsss_controller.py: send_velocity(), stop_all(), set_motor(), get_telemetry()"
+      - "Thread-safe TX via _tx_lock; pending call_service futures via threading.Event"
+      - "Context manager support (__enter__/__exit__) for clean lifecycle"
+
+    breakpoints:
+      - "Created serial_comm_py package mirroring firmware module structure"
+      - "Implemented CRC16-CCITT with Numba JIT acceleration and pure-Python fallback"
+      - "Implemented StreamParser state machine matching firmware byte-by-byte parser"
+      - "Implemented SerialCommClient with background daemon RX thread"
+      - "Added inter-byte timeout reset logic in RX loop"
+      - "Implemented blocking call_service() with threading.Event future pattern"
+      - "Added VSSSController as a domain-specific high-level client"
+
+    design decisions:
+      - The Python parser is a direct port of the firmware state machine
+        (not a regex or struct.unpack approach) so that timeout and
+        error behaviour is identical on both sides. This makes
+        cross-language debugging much easier.
+      - CRC is computed in Python with the same 256-entry lookup table
+        as the firmware. The Numba path compiles the inner loop to native
+        code, reducing CRC time at ≥2 Mbaud where Python overhead matters.
+
+
+  - version: "0.2.7"
+    description: >
+      Added ESP-NOW transport (ESPNowTransport) and a composite
+      MultiTransport that aggregates up to four sub-transports behind a
+      single ISerialCommTransport interface. SerialComm and
+      SerialCommManager required no changes — both see a single transport
+      pointer as before. Fixed a stack overflow in the dispatcher's
+      process_rx_item task caused by an undersized stack allocation.
+
+      MultiTransport uses per-slot static forwarder callbacks
+      (sub_rx_forwarder, sub_event_forwarder) registered as each
+      sub-transport's rx_callback. When any slot receives a packet it
+      forwards to the unified callback that SerialComm registered on
+      MultiTransport. The void* ctx = this pointer eliminates the need
+      for a singleton.
+
+    features:
+      - "ESPNowTransport: IDF 5.5 API (esp_now_send_cb_info_t send callback)"
+      - "ESPNowTransport: automatic frame fragmentation for >250-byte payloads"
+      - "ESPNowTransport: add_peer() / set_tx_peer() for unicast routing"
+      - "ESPNowTransport: broadcast mode — init() auto-registers {0xFF...} peer"
+      - "ESPNowTransport: write() blocks until send-done callback; write_async() does not"
+      - "MultiTransport: aggregates up to 4 sub-transports (MAX_TRANSPORTS = 4)"
+      - "MultiTransport: SlotConfig{rx, tx} enables independent RX/TX routing per slot"
+      - "MultiTransport: write() sends to all tx-enabled slots in sequence"
+      - "MultiTransport: rx_callback fires when any rx-enabled slot receives a packet"
+      - "examples/uart_example and examples/espnow_example build-verified"
+      - "Stack overflow fix: process_rx_item stack size increased"
+
+    breakpoints:
+      - "Implemented ESPNowTransport matching IDF 5.5 send callback signature"
+      - "Implemented frame fragmentation for ESP-NOW 250-byte MTU"
+      - "Implemented MultiTransport with SlotConfig rx/tx enable per sub-transport"
+      - "Introduced static forwarder callbacks to avoid singleton requirement"
+      - "Fixed stack overflow in process_rx_item dispatcher task"
+      - "Created uart_example and espnow_example with build verification"
+
+    troubleshooting:
+      - issue: "ESP-NOW send callback never fires"
+        solution: >
+          Ensure esp_now_init() and Wi-Fi are initialised before
+          ESPNowTransport::init(). The transport calls esp_now_init()
+          internally but requires Wi-Fi to be started first
+          (esp_wifi_start() in station or AP mode).
+      - issue: "MultiTransport RX callback fires twice for the same packet"
+        solution: >
+          Both slots have rx=true and both received the same broadcast.
+          Use SlotConfig{rx=true, tx=true} on one slot and
+          SlotConfig{rx=false, tx=true} on the other if the packet
+          should only be processed once.
+
+
   - version: "0.2.6"
     description: >
-      Added auto-code generator to convert the ``user_app`` definitions 
-      of events, requests and missions into structures and serializers for 
+      Added auto-code generator to convert the ``user_app`` definitions
+      of events, requests and missions into structures and serializers for
       the middleware layer.
 
     features:
@@ -55,16 +327,16 @@ roadmap:
 
   - version: "0.2.5"
     description: >
-      Create an Abstration Layer where the user can define their own 
+      Create an Abstraction Layer where the user can define their own
       middleware behavior based on a predefined ROS-like API structure.
       It will allow users to define the structure of the packet of requests
       and reply to automatically correlate the request and reply callbacks.
-      
+
     features:
       - Middleware abstraction layer
       - ROS-like event/request/mission API
       - Generic serialization API
-  
+
 
   - version: "0.2.4"
     description: >
@@ -135,14 +407,14 @@ roadmap:
       semantic request/reply abstraction.
 
     design decisions:
-      - Added 16-bit SEQ_ID field to packet structure for transaction 
-        correlation was demonstrate be an important feature for supportting
-        more complex communication patterns and to enable the implementation 
-        of a transaction manager in the middleware layer, which is a key 
-        component for  supporting more complex communication patterns like 
+      - Added 16-bit SEQ_ID field to packet structure for transaction
+        correlation was demonstrate be an important feature for supporting
+        more complex communication patterns and to enable the implementation
+        of a transaction manager in the middleware layer, which is a key
+        component for supporting more complex communication patterns like
         synchronous service calls and multi-packet transactions
-      - The Seq_id and the request/reply bit in the command field was 
-        planned to be present in the protocol version 2, with the source  
+      - The Seq_id and the request/reply bit in the command field was
+        planned to be present in the protocol version 2, with the source
         and destination fields.
 
     features:
@@ -164,8 +436,8 @@ roadmap:
     troubleshooting:
       - issue: "Protocol incompatibility with V1 clients"
         solution: >
-          V2 packets now include SEQ_ID field and request/reply bit, that 
-          forces a new implementation of the client to support the new 
+          V2 packets now include SEQ_ID field and request/reply bit, that
+          forces a new implementation of the client to support the new
           protocol version.
 
 
@@ -198,10 +470,10 @@ roadmap:
       - issue: "Parser only processing first packet"
         solution: >
           Refactor parse_buffer() to continue parsing after valid
-          packet extraction and create the parse_next_packet() helper 
+          packet extraction and create the parse_next_packet() helper
           function that supports incremental parsing.
-          It solution also add a feature to support multiple packets per 
-          RX buffer, which is a common scenario in a non stream-based 
+          It solution also add a feature to support multiple packets per
+          RX buffer, which is a common scenario in a non stream-based
           transport like Wi-Fi and other kinds of networks.
 
 
@@ -250,4 +522,4 @@ roadmap:
       - "Implemented incremental parser state machine"
       - "Added packet framing and CRC16 CCITT validation"
       - "Added FreeRTOS-safe TX mutex protection"
-      - First public release 
+      - First public release

@@ -12,6 +12,30 @@ from enum import IntEnum
 # Command byte
 # ---------------------------------------------------------------------------
 
+class DeliveryMode(IntEnum):
+    """
+    Transport-level delivery guarantee — mirrors DeliveryMode in serial_comm_types.hpp.
+
+    BEST_EFFORT — fire-and-forget (no ACK expected).
+        For UART: bytes enter the OS TX queue and the call returns immediately.
+        For ESP-NOW: fragments are sent without checking the send-done status.
+        This is the default for @best_effort IDL types.
+
+    RELIABLE — wait for link-layer confirmation before returning.
+        For UART: blocks until the hardware TX FIFO drains.
+        For ESP-NOW: waits for the per-fragment send-done callback and aborts
+        if any fragment fails.
+        This is used for @reliable IDL types (e.g. service requests).
+
+    Note: from Python the transport is always UART.  DeliveryMode affects how
+    the *firmware* sends packets over its configured transport (ESP-NOW, etc.).
+    Publishing from Python always routes through the OS serial driver and the
+    mode value is not enforced on the host side — it is carried informatively.
+    """
+    BEST_EFFORT = 0
+    RELIABLE    = 1
+
+
 class Command(IntEnum):
     UNDEFINED     = 0x00
     READ          = 0x01

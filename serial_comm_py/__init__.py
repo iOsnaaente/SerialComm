@@ -32,7 +32,7 @@ Quick start
 """
 
 from .client   import SerialCommClient, RxCallback, ServiceHandler
-from ._types   import Command, Packet, ResultCode
+from ._types   import Command, Packet, ResultCode, DeliveryMode
 from ._crc     import compute_crc16, has_numba
 from ._protocol import encode as encode_packet, decode as decode_packet
 from ._parser  import StreamParser
@@ -44,6 +44,7 @@ __all__ = [
     "Command",
     "Packet",
     "ResultCode",
+    "DeliveryMode",
     # Protocol utilities
     "compute_crc16",
     "encode_packet",

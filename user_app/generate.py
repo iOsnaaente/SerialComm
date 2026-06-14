@@ -288,6 +288,17 @@ def parse_metadata(lines):
     else:
         metadata["endian"] = "little"
 
+    if "reliable" in metadata:
+        metadata["delivery_mode"] = "RELIABLE"
+    else:
+        metadata["delivery_mode"] = "BEST_EFFORT"
+
+    # Normalise flag-only decorators to booleans
+    metadata.setdefault("retain",     False)
+    metadata.setdefault("deprecated", False)
+    if metadata.get("retain")     is True: metadata["retain"]     = True
+    if metadata.get("deprecated") is True: metadata["deprecated"] = True
+
     return metadata, filtered
 
 
@@ -422,8 +433,14 @@ def generate_header(dependencies):
 # STRUCT GENERATOR
 # =============================================================================
 
-def generate_struct(name, fields, metadata):
+def generate_struct(name, fields, metadata, delivery_mode=None):
     out = []
+
+    # @deprecated: warn on every use of the generated type
+    if metadata.get("deprecated"):
+        reason = f"SerialComm IDL: {name} is @deprecated — migrate to a newer version"
+        out.append(f'[[deprecated("{reason}")]]')
+
     out.append(f"struct {name} {{")
     for field in fields:
         cpp_type = convert_type(field["type"])
@@ -443,6 +460,44 @@ def generate_struct(name, fields, metadata):
         )
     else:
         out.append("        0;")
+
+    # DELIVERY MODE (only for top-level message types, not embedded structs)
+    if delivery_mode is not None:
+        out.append(
+            f"    static constexpr DeliveryMode DELIVERY_MODE = "
+            f"DeliveryMode::{delivery_mode};"
+        )
+
+    # @timeout_ms N — per-type call_service timeout (read by serial_comm_timeout_ms<T>())
+    if "timeout_ms" in metadata:
+        out.append(
+            f"    static constexpr uint32_t TIMEOUT_MS = "
+            f"{metadata['timeout_ms']};"
+        )
+
+    # @version N — IDL schema version (informational; read via T::SCHEMA_VERSION)
+    if "version" in metadata:
+        out.append(
+            f"    static constexpr uint8_t SCHEMA_VERSION = "
+            f"{metadata['version']};"
+        )
+
+    # @retain — last-value cache flag (read by serial_comm_retain<T>())
+    if metadata.get("retain"):
+        out.append(
+            "    static constexpr bool RETAIN = true;"
+        )
+
+    # @max_rate_hz N — enforce publish rate in Python client and runtime guards
+    if "max_rate_hz" in metadata:
+        rate_val = float(metadata["max_rate_hz"])
+        rate_str = f"{rate_val:.6g}"          # e.g. "33" → "33"
+        if "." not in rate_str and "e" not in rate_str:
+            rate_str += ".0"                  # ensure valid C++ float literal
+        out.append(
+            f"    static constexpr float MAX_RATE_HZ = {rate_str}f;"
+        )
+
     out.append("};")
 
     # ID
@@ -644,16 +699,20 @@ def process_request(path: Path, output_dir: Path):
 
     header = generate_header(deps)
 
+    delivery_mode = metadata["delivery_mode"]
+
     req_code = generate_struct(
         f"{name}_Request",
         req_fields,
-        metadata
+        metadata,
+        delivery_mode
     )
 
     res_code = generate_struct(
         f"{name}_Response",
         res_fields,
-        metadata
+        metadata,
+        delivery_mode
     )
 
     out_dir = output_dir / "request"
@@ -738,7 +797,7 @@ def process_event(path: Path, output_dir: Path):
             fields.append(field)
     deps = collect_dependencies(fields)
     header = generate_header(deps)
-    event_code = generate_struct( name, fields, metadata )
+    event_code = generate_struct( name, fields, metadata, metadata["delivery_mode"] )
     event_dir = output_dir / "event"
     serializer_dir = output_dir / "serializers"
     ensure_dir(event_dir)
@@ -800,9 +859,10 @@ def process_mission(path: Path, output_dir: Path):
         goal_fields + result_fields + feedback_fields
     )
     header = generate_header(deps)
-    goal_code = generate_struct( f"{name}_Goal", goal_fields, metadata )
-    result_code = generate_struct( f"{name}_Result", result_fields, metadata )
-    feedback_code = generate_struct( f"{name}_Feedback", feedback_fields, metadata )
+    delivery_mode = metadata["delivery_mode"]
+    goal_code = generate_struct( f"{name}_Goal", goal_fields, metadata, delivery_mode )
+    result_code = generate_struct( f"{name}_Result", result_fields, metadata, delivery_mode )
+    feedback_code = generate_struct( f"{name}_Feedback", feedback_fields, metadata, delivery_mode )
     out_dir = output_dir / "mission"
     ensure_dir(out_dir)
     with open( out_dir / f"{snake_case(name)}.hpp", "w" ) as f:

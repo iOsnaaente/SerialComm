@@ -9,7 +9,7 @@ menu "SerialComm Middleware"
 
         config SERIAL_COMM_UART_BAUDRATE
             int "UART Baudrate"
-            range 9600 1000000
+            range 9600 5000000
             default 921600
 
         config SERIAL_COMM_UART_TX_PIN

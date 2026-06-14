@@ -35,6 +35,16 @@ errCode SerialCommManager::init( const Config& cfg ) {
         return errCode::ERR_NO_MEMORY;
     }
 
+    this->retained_mutex_ = xSemaphoreCreateMutex();
+    if ( this->retained_mutex_ == nullptr ) {
+        vSemaphoreDelete( this->seq_mutex_ );
+        vSemaphoreDelete( this->registry_mutex_ );
+        this->seq_mutex_      = nullptr;
+        this->registry_mutex_ = nullptr;
+        return errCode::ERR_NO_MEMORY;
+    }
+    memset( this->retained_, 0, sizeof(this->retained_) );
+
     // Clear registries 
     this->clear_registries();
 
@@ -97,6 +107,10 @@ errCode SerialCommManager::deinit() {
     if( this->registry_mutex_ != nullptr ) {
         vSemaphoreDelete( this->registry_mutex_ );
         this->registry_mutex_ = nullptr;
+    }
+    if ( this->retained_mutex_ != nullptr ) {
+        vSemaphoreDelete( this->retained_mutex_ );
+        this->retained_mutex_ = nullptr;
     }
     this->clear_registries();
     this->initialized_ = false;
@@ -198,8 +212,52 @@ uint16_t SerialCommManager::current_seq_id() const {
 
 void SerialCommManager::clear_registries() {
     memset( this->services_, 0, sizeof(this->services_) );
-    memset( this->topics_, 0, sizeof(this->topics_) );
-    memset( this->actions_, 0, sizeof(this->actions_) );
+    memset( this->topics_,   0, sizeof(this->topics_)   );
+    memset( this->actions_,  0, sizeof(this->actions_)  );
+    memset( this->retained_, 0, sizeof(this->retained_) );
+}
+
+
+void SerialCommManager::mark_retained( Command command ) {
+    if ( retained_mutex_ == nullptr ) return;
+    xSemaphoreTake( retained_mutex_, portMAX_DELAY );
+    for ( size_t i = 0; i < MAX_RETAINED; i++ ) {
+        if ( retained_[i].registered && retained_[i].command == command ) {
+            xSemaphoreGive( retained_mutex_ );
+            return; /* already registered */
+        }
+        if ( !retained_[i].registered ) {
+            retained_[i].registered  = true;
+            retained_[i].has_payload = false;
+            retained_[i].command     = command;
+            retained_[i].len         = 0;
+            xSemaphoreGive( retained_mutex_ );
+            ESP_LOGI( TAG, "Retain registered for cmd=0x%02X", static_cast<uint8_t>(command) );
+            return;
+        }
+    }
+    xSemaphoreGive( retained_mutex_ );
+    ESP_LOGW( TAG, "mark_retained: no free slot (max %zu)", MAX_RETAINED );
+}
+
+
+void SerialCommManager::store_if_retained( const SerialCommProtoPacket& packet ) {
+    if ( retained_mutex_ == nullptr ) return;
+    xSemaphoreTake( retained_mutex_, portMAX_DELAY );
+    for ( size_t i = 0; i < MAX_RETAINED; i++ ) {
+        if ( retained_[i].registered && retained_[i].command == packet.header.command ) {
+            size_t len = packet.header.payload_len;
+            if ( len > SERIAL_COMM_MAX_PAYLOAD ) {
+                len = SERIAL_COMM_MAX_PAYLOAD;
+            }
+            memcpy( retained_[i].payload, packet.payload, len );
+            retained_[i].len         = len;
+            retained_[i].has_payload = true;
+            xSemaphoreGive( retained_mutex_ );
+            return;
+        }
+    }
+    xSemaphoreGive( retained_mutex_ );
 }
 
 
@@ -237,6 +295,9 @@ bool SerialCommManager::handle_topic_message( const SerialCommProtoPacket& packe
         packet.header.seq_id,
         packet.header.payload_len
     );
+    /* @retain: update last-value cache before dispatching to subscriber */
+    store_if_retained( packet );
+
     errCode res = entry->topic->handle_packet( packet );
     if ( res != errCode::OK ) {
         ESP_LOGW(TAG, "Topic handler failed: cmd=0x%02X err=%s", static_cast<uint8_t>(packet.header.command), err_to_str(res));

@@ -38,6 +38,7 @@ import serial
 
 from ._types import (
     Command,
+    DeliveryMode,
     Packet,
     ResultCode,
     REPLY_MASK,
@@ -91,6 +92,11 @@ class SerialCommClient:
         The firmware default is 3.5 characters.  Set to 0 to disable.
     read_chunk : int
         Bytes to request per ``serial.read()`` call (performance tuning only).
+    read_timeout : float
+        ``serial.Serial`` read timeout in seconds.  Caps RX delivery latency:
+        a packet that arrives at t=0 will be dispatched by t=``read_timeout``
+        at the latest.  Default 1 ms (0.001) is suitable for ≤921600 baud;
+        reduce to 0.0002 for ≥2 Mbaud applications.
     """
 
     def __init__(
@@ -99,10 +105,12 @@ class SerialCommClient:
         baudrate:                   int   = 115200,
         inter_byte_timeout_chars:   float = 3.5,
         read_chunk:                 int   = 256,
+        read_timeout:               float = 0.001,
     ) -> None:
-        self._port     = port
-        self._baudrate = baudrate
-        self._read_chunk = read_chunk
+        self._port         = port
+        self._baudrate     = baudrate
+        self._read_chunk   = read_chunk
+        self._read_timeout = read_timeout
 
         # Inter-byte timeout in seconds
         byte_time_s = 10.0 / baudrate
@@ -140,6 +148,17 @@ class SerialCommClient:
         }
         self._stats_lock = threading.Lock()
 
+        # @max_rate_hz — per-command rate limiter
+        # cmd_int → (min_interval_s, last_tx_time)
+        self._rate_limiters: Dict[int, tuple] = {}
+        self._rate_lock = threading.Lock()
+
+        # @retain — last-value cache
+        # cmd_int → raw payload bytes
+        self._retained: Dict[int, bytes] = {}
+        self._retained_enabled: set = set()
+        self._retain_lock = threading.Lock()
+
         self._rx_thread:  Optional[threading.Thread] = None
         self._stop_event  = threading.Event()
         self._running     = False
@@ -163,7 +182,7 @@ class SerialCommClient:
             bytesize = serial.EIGHTBITS,
             parity   = serial.PARITY_NONE,
             stopbits = serial.STOPBITS_ONE,
-            timeout  = 0.005,      # 5 ms read timeout → responsive inter-byte check
+            timeout  = self._read_timeout,
         )
 
         self._stop_event.clear()
@@ -204,10 +223,70 @@ class SerialCommClient:
     # Topic — publish (fire and forget)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Rate limiting (@max_rate_hz)
+    # ------------------------------------------------------------------
+
+    def set_rate_limit(self, command: int | Command, max_rate_hz: float) -> None:
+        """
+        Enforce a publish rate ceiling on *command*.
+
+        Calls to ``publish()`` that arrive sooner than ``1/max_rate_hz``
+        seconds since the last accepted call return ``ResultCode.ERR_BUSY``
+        without sending any bytes.
+
+        Parameters
+        ----------
+        command : int or Command
+        max_rate_hz : float
+            Maximum number of publishes per second; 0 removes the limit.
+        """
+        cmd = int(command)
+        with self._rate_lock:
+            if max_rate_hz <= 0:
+                self._rate_limiters.pop(cmd, None)
+            else:
+                interval = 1.0 / max_rate_hz
+                # preserve last_tx_time if already set
+                prev = self._rate_limiters.get(cmd, (0.0, 0.0))
+                self._rate_limiters[cmd] = (interval, prev[1])
+
+    # ------------------------------------------------------------------
+    # Retain cache (@retain)
+    # ------------------------------------------------------------------
+
+    def set_retain(self, command: int | Command, enabled: bool = True) -> None:
+        """
+        Enable or disable the last-value cache for *command*.
+
+        When enabled, every *received* packet with this command byte has its
+        payload stored.  Use ``get_last()`` to read it at any time.
+        """
+        cmd = int(command)
+        with self._retain_lock:
+            if enabled:
+                self._retained_enabled.add(cmd)
+            else:
+                self._retained_enabled.discard(cmd)
+                self._retained.pop(cmd, None)
+
+    def get_last(self, command: int | Command) -> Optional[bytes]:
+        """
+        Return the most recently received payload for *command*, or ``None``
+        if no packet has been received yet (or retain is disabled for it).
+        """
+        with self._retain_lock:
+            return self._retained.get(int(command))
+
+    # ------------------------------------------------------------------
+    # Topic — publish (fire and forget)
+    # ------------------------------------------------------------------
+
     def publish(
         self,
         command: int | Command,
         payload: bytes | bytearray = b"",
+        delivery_mode: DeliveryMode = DeliveryMode.BEST_EFFORT,
     ) -> ResultCode:
         """
         Send a packet without waiting for a reply.
@@ -221,16 +300,40 @@ class SerialCommClient:
             a plain int for user-defined ``@id`` values (e.g. ``0x10``).
         payload : bytes
             Serialized message payload.
+        delivery_mode : DeliveryMode
+            BEST_EFFORT (default) — fire-and-forget, no flush after write.
+            RELIABLE — flushes the OS serial TX buffer before returning,
+            guaranteeing bytes are out of the host before the call returns.
+            Note: UART has no link-layer ACK; RELIABLE only means the host
+            TX buffer drained.  The firmware uses this field when forwarding
+            via ESP-NOW.
         """
         if not self._running:
             return ResultCode.ERR_NOT_INITIALIZED
+
+        # @max_rate_hz — drop if published too recently
+        cmd_int = int(command)
+        now = time.monotonic()
+        with self._rate_lock:
+            limiter = self._rate_limiters.get(cmd_int)
+            if limiter is not None:
+                interval, last_tx = limiter
+                if now - last_tx < interval:
+                    return ResultCode.ERR_BUSY
+                self._rate_limiters[cmd_int] = (interval, now)
+
         try:
             seq = self._next_seq_id()
-            frame = _encode_packet(seq, int(command), payload)
+            frame = _encode_packet(seq, cmd_int, payload)
             self._write_frame(frame)
+            if delivery_mode == DeliveryMode.RELIABLE:
+                self._serial.flush()  # drain OS TX buffer
             with self._stats_lock:
                 self._stats["tx_packets"] += 1
-            log.debug("TX  seq=%04x  cmd=%02x  len=%d", seq, int(command), len(payload))
+            log.debug(
+                "TX  seq=%04x  cmd=%02x  len=%d  mode=%s",
+                seq, cmd_int, len(payload), delivery_mode.name,
+            )
             return ResultCode.OK
         except serial.SerialException as exc:
             log.error("publish() serial error: %s", exc)
@@ -279,6 +382,7 @@ class SerialCommClient:
         try:
             frame = _encode_packet(seq, cmd_int, payload)
             self._write_frame(frame)
+            self._serial.flush()   # reliable: drain OS TX buffer before waiting
             with self._stats_lock:
                 self._stats["tx_packets"] += 1
             log.debug(
@@ -528,6 +632,11 @@ class SerialCommClient:
                         self._stats["tx_packets"] += 1
                 except serial.SerialException as exc:
                     log.error("Service reply serial error: %s", exc)
+
+        # @retain — update last-value cache for retained commands
+        with self._retain_lock:
+            if cmd in self._retained_enabled:
+                self._retained[cmd] = bytes(pkt.payload)
 
         # --- Subscription callbacks ---
         with self._sub_lock:

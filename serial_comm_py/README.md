@@ -23,7 +23,7 @@ pip install -r requirements.txt
 from serial_comm_py import SerialCommClient, Command
 import struct
 
-client = SerialCommClient(port='/dev/ttyUSB0', baudrate=115200)
+client = SerialCommClient(port='/dev/ttyUSB0', baudrate=921600)
 client.start()
 
 # --- Publish an event (fire and forget) ---------------------------------
@@ -95,7 +95,7 @@ input = seq_id(2 LE) + version(1) + command(1) + payload_len(2 LE) + payload(N)
 ```python
 from serial_comm_py.vsss_controller import VSSSController, ROBOT_ID_ALL
 
-with VSSSController(port='/dev/ttyUSB0', baudrate=115200) as ctrl:
+with VSSSController(port='/dev/ttyUSB0', baudrate=921600) as ctrl:
     rtt = ctrl.ping()
     ctrl.send_velocity(0,  1.0, 1.0)  # Robot 0 forward
     ctrl.send_velocity(ROBOT_ID_ALL, 0.5, -0.5)  # all robots rotate
@@ -105,7 +105,7 @@ with VSSSController(port='/dev/ttyUSB0', baudrate=115200) as ctrl:
 Run the demo:
 
 ```bash
-python serial_comm_py/vsss_controller.py --port /dev/ttyUSB0 --baud 115200 --hz 20
+python serial_comm_py/vsss_controller.py --port /dev/ttyUSB0 --baud 921600 --hz 33
 ```
 
 ## API reference
@@ -115,9 +115,10 @@ python serial_comm_py/vsss_controller.py --port /dev/ttyUSB0 --baud 115200 --hz 
 ```python
 client = SerialCommClient(
     port='...',
-    baudrate=115200,
-    inter_byte_timeout_chars=3.5,   # mirrors firmware watchdog (3.5 chars)
+    baudrate=921600,
+    inter_byte_timeout_chars=3.5,   # mirrors firmware watchdog
     read_chunk=256,
+    read_timeout=0.001,             # caps RX latency at 1 ms (reduce to 0.0002 for ≥2 Mbaud)
 )
 ```
 
@@ -180,5 +181,34 @@ client = SerialCommClient(port=..., inter_byte_timeout_chars=0)     # disable
 | CRC16 — Numba JIT    | ~200 MB/s (first call: JIT compile ~1 s) |
 | Parser — pure Python | >100 MB/s (state machine, Python 3.12) |
 
-For SerialComm at 115200 baud (~11 KB/s) pure Python is more than sufficient.
-Numba only matters if you replay large binary captures offline.
+At 921600 baud (~92 KB/s) pure Python CRC and parser are more than sufficient.
+Numba only matters when replaying large binary captures offline.
+
+### Protocol limits
+
+| Layer | Hard limit | How to detect | Fix |
+|-------|-----------|---------------|-----|
+| Kconfig baud range | ~~1 Mbaud~~ → raised to **5 Mbaud** | menuconfig rejects value | `range` already updated |
+| ESP32 UART hardware | ~3.5 Mbaud (UART2, short cable) | framing errors, CRC errors | lower baud |
+| UART RX buffer (firmware) | stalls if processing lag > buffer drain time | `UART_BUFFER_FULL_INT` fires | raise `CONFIG_SERIAL_COMM_UART_RX_BUFFER_SIZE` |
+| Python `read_timeout` | max RX delivery latency = `read_timeout` | data correct but delayed | lower `read_timeout` (default 1 ms) |
+| Python thread / GIL | sustained >~500 KB/s may lag | `parser_resets` grows | `read_chunk=4096` |
+| Python inter-byte timeout | false reset if `inter_byte_timeout_chars` window < `read_timeout` | `parser_resets` > 0 with valid data | set `inter_byte_timeout_chars=0` to disable |
+
+**VSSS bridge at 921600 baud, 30 ms cycle — bandwidth utilization:**
+
+- 3 × `RobotVelocityCmd` (20 B each) + 3 × `RobotTelemetry` (33 B each) = 159 B / cycle
+- Required: 159 / 0.030 s = 5 300 B/s — **5.75% of 92 160 B/s available (17× headroom)**
+- Actual bottleneck: ESP-NOW unicast + ACK (~2–5 ms per packet × 6 packets = 12–30 ms)
+
+**Diagnosing saturation at runtime:**
+
+```python
+s = ctrl.stats()
+crc_rate = s["crc_errors"] / max(1, s["rx_packets"])
+print(f"CRC error rate : {crc_rate:.1%}")   # >1% → UART noise or buffer overrun
+print(f"Parser resets  : {s['parser_resets']}")  # >0 → inter-byte timeout false trigger
+print(f"Timeouts       : {s['timeouts']}")        # >0 → service reply lost, queue backup
+```
+
+Round-trip latency (`ctrl.ping()`) growing over successive calls → firmware queue saturated.

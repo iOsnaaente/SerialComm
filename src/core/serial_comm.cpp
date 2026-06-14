@@ -159,7 +159,10 @@ errCode SerialComm::deinit() {
 }
 
 
-errCode SerialComm::send( const SerialCommProtoPacket& packet ) {
+errCode SerialComm::send(
+    const SerialCommProtoPacket& packet,
+    DeliveryMode mode
+) {
     if ( !this->running_ ){
         ESP_LOGE( TAG, "Cannot send: Not running" );
         return errCode::ERR_INVALID_STATE;
@@ -183,14 +186,22 @@ errCode SerialComm::send( const SerialCommProtoPacket& packet ) {
         return errCode::ERR_FAIL;
     }
 
-    int written = this->transport_->write( tx_buffer, packet_len );
-    xSemaphoreGive(this->tx_mutex_);
-
-    if (written != (int)packet_len) {
-        ESP_LOGE( TAG,"Transport write failed [%d/%d]", written, packet_len);
-        return errCode::ERR_IO;
+    errCode result;
+    if (mode == DeliveryMode::RELIABLE) {
+        int written = this->transport_->write( tx_buffer, packet_len );
+        result = (written == (int)packet_len) ? errCode::OK : errCode::ERR_IO;
+        if (result != errCode::OK) {
+            ESP_LOGE( TAG, "Transport write (reliable) failed [%d/%d]", written, (int)packet_len );
+        }
+    } else {
+        result = this->transport_->write_async( tx_buffer, packet_len );
+        if (result != errCode::OK) {
+            ESP_LOGE( TAG, "Transport write_async (best-effort) failed" );
+        }
     }
-    return errCode::OK;
+
+    xSemaphoreGive(this->tx_mutex_);
+    return result;
 }
 
 

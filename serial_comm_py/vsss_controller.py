@@ -26,7 +26,7 @@ import time
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from serial_comm_py import SerialCommClient, Command, Packet
+from serial_comm_py import SerialCommClient, Command, DeliveryMode, Packet
 
 logging.basicConfig(
     level  = logging.INFO,
@@ -96,11 +96,12 @@ class VSSSController:
     Telemetry callbacks run in the SerialCommClient RX thread — keep them fast.
     """
 
-    def __init__(self, port: str, baudrate: int = 115200) -> None:
+    def __init__(self, port: str, baudrate: int = 921600) -> None:
         self._client = SerialCommClient(
             port     = port,
             baudrate = baudrate,
             inter_byte_timeout_chars = 3.5,
+            read_timeout = 0.001,
         )
         self._telemetry: dict[int, dict] = {}
         self._telem_lock = __import__("threading").Lock()
@@ -148,7 +149,7 @@ class VSSSController:
             Right-wheel velocity.
         """
         payload = pack_vel_cmd(robot_id, vl, vr)
-        rc = self._client.publish(VEL_CMD, payload)
+        rc = self._client.publish(VEL_CMD, payload, DeliveryMode.BEST_EFFORT)
         if robot_id == ROBOT_ID_ALL:
             log.debug("VelCmd → ALL  vl=%.2f vr=%.2f  rc=%s", vl, vr, rc.name)
         else:
@@ -176,6 +177,7 @@ class VSSSController:
         Returns (success, actual_speed).
         """
         payload = pack_set_motor(motor_id, speed, enable)
+        # call_service is always reliable: we're waiting for a reply
         ok, resp = self._client.call_service(MOT_CMD, payload, timeout=timeout)
         if ok:
             r = unpack_set_motor_response(resp)
@@ -224,7 +226,7 @@ class VSSSController:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="VSSS bridge controller demo")
     p.add_argument("--port",  default="/dev/ttyUSB0", help="Serial port")
-    p.add_argument("--baud",  type=int, default=115200, help="Baud rate")
+    p.add_argument("--baud",  type=int, default=921600, help="Baud rate")
     p.add_argument("--hz",    type=float, default=10.0, help="Command rate (Hz)")
     p.add_argument("--debug", action="store_true", help="Enable debug logging")
     return p.parse_args()
