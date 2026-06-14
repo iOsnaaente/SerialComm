@@ -1,0 +1,14 @@
+# Telemetry sent from robot to bridge (ESP-NOW), then bridge to PC (UART)
+# Carries accelerometer readings and measured wheel speeds
+@id 0x11
+@best_effort
+@version 1
+@retain
+
+uint8 robot_id
+float32 ax
+float32 ay
+float32 gz
+float32 vl_measured
+float32 vr_measured
+bool ball_detected

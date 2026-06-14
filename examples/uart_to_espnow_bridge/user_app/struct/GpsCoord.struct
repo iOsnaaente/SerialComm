@@ -1,0 +1,5 @@
+# GPS coordinate — reused by SensorReading and other events
+
+float32 latitude
+float32 longitude
+float32 altitude

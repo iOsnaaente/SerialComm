@@ -1,0 +1,9 @@
+# Velocity command sent from PC (via UART) to bridge, then bridge to robot (via ESP-NOW)
+# robot_id: 0-2 = specific robot; 0xFF = broadcast to all robots
+@id 0x10
+@best_effort
+@max_rate_hz 33
+
+uint8 robot_id
+float32 vl
+float32 vr

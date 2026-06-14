@@ -1,0 +1,15 @@
+# Motor control request — handled locally by the bridge node
+@reliable
+@timeout_ms 500
+@version 1
+
+# ── Request ────────────────────────────────────────────────────────────
+uint8 motor_id
+float32 speed
+bool enable
+
+===
+
+# ── Response ───────────────────────────────────────────────────────────
+bool success
+float32 actual_speed

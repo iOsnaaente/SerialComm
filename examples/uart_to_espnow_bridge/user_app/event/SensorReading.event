@@ -1,0 +1,8 @@
+# Sensor reading event — published by a sensor node, relayed by the bridge
+# Carries temperature, humidity, timestamp and GPS position
+@best_effort
+
+float32 temperature
+float32 humidity
+uint32 timestamp_ms
+GpsCoord location

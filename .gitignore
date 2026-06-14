@@ -10,12 +10,13 @@ __pycache__/
 # Generated files by SerialComm code generator
 include/serial_comm/generated/*
 
-# Defaults structures 
-user_app/common/*
-user_app/event/*
-user_app/mission/*
-user_app/request/*
-user_app/struct/*
+# Root-level user_app IDL files (per-project definitions, not committed)
+# Leading / anchors the pattern to the repo root so examples/*/user_app/ is NOT affected.
+/user_app/common/*
+/user_app/event/*
+/user_app/mission/*
+/user_app/request/*
+/user_app/struct/*
 
 
 TODO_PLANNER.md
