@@ -4,4 +4,4 @@ cmake_minimum_required(VERSION 3.16)
 # No EXTRA_COMPONENT_DIRS needed — IDF finds components/ automatically.
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(uart_example)
+project(uart_to_espnow_bridge)
