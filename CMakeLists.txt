@@ -53,6 +53,7 @@ idf_component_register(
 
                 "src/transport/uart_serial_comm.cpp"
                 "src/transport/espnow_serial_comm.cpp"
+                "src/transport/multi_transport.cpp"
 
         INCLUDE_DIRS
                 "include"
