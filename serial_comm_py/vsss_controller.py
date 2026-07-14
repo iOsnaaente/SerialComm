@@ -9,24 +9,31 @@ This script connects to the VSSS ESP-NOW bridge via UART and:
 Run with:
     python vsss_controller.py --port /dev/ttyUSB0 --baud 115200
 
-Message formats (must match the IDL definitions in user_app/):
-    RobotVelocityCmd  @id 0x10   struct '<Bff'   (robot_id, vl, vr)
-    RobotTelemetry    @id 0x11   struct '<BfffffB' (robot_id, ax, ay, gz,
-                                                    vl_measured, vr_measured,
-                                                    ball_detected)
+Message formats are auto-generated from the IDL in user_app/ — see:
+    include/serial_comm/generated/python/
 """
 
 import argparse
 import logging
-import struct
 import sys
 import time
 
 # Add parent directory to path so the script can be run from any location.
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Auto-generated serializers live alongside the C++ headers
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "include", "serial_comm", "generated"
+))
 
 from serial_comm_py import SerialCommClient, Command, DeliveryMode, Packet
+from python import (
+    pack_robot_velocity_cmd,
+    unpack_robot_telemetry,
+    pack_set_motor_request,
+    unpack_set_motor_response,
+)
 
 logging.basicConfig(
     level  = logging.INFO,
@@ -40,48 +47,11 @@ log = logging.getLogger("vsss")
 
 VEL_CMD = Command(0x10)   # RobotVelocityCmd
 TEL_CMD = Command(0x11)   # RobotTelemetry
-MOT_CMD = Command(0x20)   # SetMotor (service — only if firmware uses 0x20)
+MOT_CMD = Command(0x14)   # SetMotor request (@id 0x14 from SetMotor.request IDL)
 
 ROBOT_ID_ALL = 0xFF       # broadcast to all robots
 
 NUM_ROBOTS = 3
-
-# ---------------------------------------------------------------------------
-# Serializers  (mirror the generated C++ serializers)
-# ---------------------------------------------------------------------------
-
-def pack_vel_cmd(robot_id: int, vl: float, vr: float) -> bytes:
-    """Serialize RobotVelocityCmd payload (9 bytes)."""
-    return struct.pack("<Bff", robot_id & 0xFF, vl, vr)
-
-
-def unpack_telemetry(payload: bytes) -> dict:
-    """Deserialize RobotTelemetry payload (22 bytes)."""
-    if len(payload) < 22:
-        return {}
-    robot_id, ax, ay, gz, vl, vr, ball = struct.unpack_from("<BfffffB", payload)
-    return {
-        "robot_id":    robot_id,
-        "ax":          ax,
-        "ay":          ay,
-        "gz":          gz,
-        "vl_measured": vl,
-        "vr_measured": vr,
-        "ball":        bool(ball),
-    }
-
-
-def pack_set_motor(motor_id: int, speed: float, enable: bool) -> bytes:
-    """Serialize SetMotor_Request payload (6 bytes)."""
-    return struct.pack("<Bf?", motor_id & 0xFF, speed, enable)
-
-
-def unpack_set_motor_response(payload: bytes) -> dict:
-    """Deserialize SetMotor_Response payload (5 bytes)."""
-    if len(payload) < 5:
-        return {}
-    success, actual_speed = struct.unpack_from("<Bf", payload)
-    return {"success": bool(success), "actual_speed": actual_speed}
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +118,7 @@ class VSSSController:
         vr : float
             Right-wheel velocity.
         """
-        payload = pack_vel_cmd(robot_id, vl, vr)
+        payload = pack_robot_velocity_cmd({"robot_id": robot_id & 0xFF, "vl": vl, "vr": vr})
         rc = self._client.publish(VEL_CMD, payload, DeliveryMode.BEST_EFFORT)
         if robot_id == ROBOT_ID_ALL:
             log.debug("VelCmd → ALL  vl=%.2f vr=%.2f  rc=%s", vl, vr, rc.name)
@@ -176,11 +146,11 @@ class VSSSController:
 
         Returns (success, actual_speed).
         """
-        payload = pack_set_motor(motor_id, speed, enable)
+        payload = pack_set_motor_request({"motor_id": motor_id & 0xFF, "speed": speed, "enable": enable})
         # call_service is always reliable: we're waiting for a reply
         ok, resp = self._client.call_service(MOT_CMD, payload, timeout=timeout)
         if ok:
-            r = unpack_set_motor_response(resp)
+            r, _ = unpack_set_motor_response(resp)
             return r.get("success", False), r.get("actual_speed", 0.0)
         return False, 0.0
 
@@ -198,17 +168,17 @@ class VSSSController:
             return dict(self._telemetry.get(robot_id, {}))
 
     def _on_telemetry(self, pkt: Packet) -> None:
-        tel = unpack_telemetry(pkt.payload)
-        if not tel:
+        if len(pkt.payload) < 22:
             log.warning("Malformed telemetry payload (%d bytes)", len(pkt.payload))
             return
+        tel, _ = unpack_robot_telemetry(pkt.payload)
         rid = tel["robot_id"]
         with self._telem_lock:
             self._telemetry[rid] = tel
         log.debug(
             "Telemetry Robot%d  ax=%.2f ay=%.2f gz=%.2f  vl=%.2f vr=%.2f  ball=%s",
             rid, tel["ax"], tel["ay"], tel["gz"],
-            tel["vl_measured"], tel["vr_measured"], tel["ball"],
+            tel["vl_measured"], tel["vr_measured"], tel["ball_detected"],
         )
 
     # ------------------------------------------------------------------
@@ -276,7 +246,7 @@ def main() -> None:
                             f"gz={tel['gz']:+.2f}  "
                             f"vl={tel['vl_measured']:.2f}  "
                             f"vr={tel['vr_measured']:.2f}  "
-                            f"ball={'YES' if tel['ball'] else ' no'}",
+                            f"ball={'YES' if tel['ball_detected'] else ' no'}",
                             flush=True,
                         )
 

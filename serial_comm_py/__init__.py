@@ -31,15 +31,17 @@ Quick start
     client.stop()
 """
 
-from .client   import SerialCommClient, RxCallback, ServiceHandler
-from ._types   import Command, Packet, ResultCode, DeliveryMode
-from ._crc     import compute_crc16, has_numba
-from ._protocol import encode as encode_packet, decode as decode_packet
-from ._parser  import StreamParser
+from .client      import SerialCommClient, RxCallback, ServiceHandler
+from .udp_client  import UDPSerialCommClient
+from ._types      import Command, Packet, ResultCode, DeliveryMode
+from ._crc        import compute_crc16, has_numba
+from ._protocol   import encode as encode_packet, decode as decode_packet
+from ._parser     import StreamParser
 
 __all__ = [
-    # Main class
+    # Main classes
     "SerialCommClient",
+    "UDPSerialCommClient",
     # Types
     "Command",
     "Packet",

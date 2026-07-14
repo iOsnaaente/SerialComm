@@ -1,0 +1,8 @@
+# Operational state of a smart servo node
+@id 0x20
+@base uint8
+
+IDLE = 0
+RUNNING = 1
+FAULT = 2
+CALIBRATING = 3

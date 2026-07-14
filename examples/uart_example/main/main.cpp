@@ -163,10 +163,7 @@ extern "C" void app_main(void) {
 
     static UARTTransport transport(hw);
 
-    ISerialCommTransport::Config t_cfg{};
-    t_cfg.timeout_ms = 500;
-
-    if (transport.init(t_cfg) != errCode::OK) {
+    if (transport.init() != errCode::OK) {
         ESP_LOGE(TAG, "UART transport init failed");
         return;
     }
@@ -182,8 +179,7 @@ extern "C" void app_main(void) {
     // -----------------------------------------------------------------------
     static SerialComm comm(&transport);
 
-    SerialComm::Config sc_cfg{};
-    if (comm.init(sc_cfg) != errCode::OK) {
+    if (comm.init() != errCode::OK) {
         ESP_LOGE(TAG, "SerialComm init failed");
         return;
     }
@@ -197,10 +193,7 @@ extern "C" void app_main(void) {
     // -----------------------------------------------------------------------
     static SerialCommManager mgr(&comm);
 
-    SerialCommManager::Config mgr_cfg{};
-    mgr_cfg.service_timeout_ms = 2000;
-
-    if (mgr.init(mgr_cfg) != errCode::OK) {
+    if (mgr.init() != errCode::OK) {
         ESP_LOGE(TAG, "SerialCommManager init failed");
         return;
     }

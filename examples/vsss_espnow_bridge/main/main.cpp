@@ -240,10 +240,7 @@ extern "C" void app_main(void) {
     uart_hw.rx_pin    = 16;
 
     static UARTTransport uart(uart_hw);
-    ISerialCommTransport::Config uart_cfg{};
-    uart_cfg.timeout_ms = 500;
-
-    if (uart.init(uart_cfg)  != errCode::OK) { ESP_LOGE(TAG, "UART init fail");  return; }
+    if (uart.init() != errCode::OK) { ESP_LOGE(TAG, "UART init fail");  return; }
     if (uart.start()         != errCode::OK) { ESP_LOGE(TAG, "UART start fail"); return; }
     ESP_LOGI(TAG, "UART ready (RX=GPIO%d  TX=GPIO%d)", uart_hw.rx_pin, uart_hw.tx_pin);
 
@@ -254,10 +251,7 @@ extern "C" void app_main(void) {
     static ESPNowTransport espnow(espnow_hw);
     g_espnow = &espnow;
 
-    ISerialCommTransport::Config espnow_cfg{};
-    espnow_cfg.timeout_ms = 1000;
-
-    if (espnow.init(espnow_cfg) != errCode::OK) { ESP_LOGE(TAG, "ESP-NOW init fail");  return; }
+    if (espnow.init() != errCode::OK) { ESP_LOGE(TAG, "ESP-NOW init fail");  return; }
 
     /* ── Register every robot as a peer ─────────────────────────────
      *
@@ -293,14 +287,12 @@ extern "C" void app_main(void) {
 
     /* ── SerialComm stack A: UART (PC ↔ Bridge) ─────────────────────── */
     static SerialComm uart_comm(&uart);
-    SerialComm::Config sc_cfg{};
-    if (uart_comm.init(sc_cfg)  != errCode::OK) { ESP_LOGE(TAG, "uart_comm init fail");  return; }
-    if (uart_comm.start()       != errCode::OK) { ESP_LOGE(TAG, "uart_comm start fail"); return; }
+    if (uart_comm.init()  != errCode::OK) { ESP_LOGE(TAG, "uart_comm init fail");  return; }
+    if (uart_comm.start() != errCode::OK) { ESP_LOGE(TAG, "uart_comm start fail"); return; }
 
     static SerialCommManager uart_mgr(&uart_comm);
     g_uart_mgr = &uart_mgr;
-    SerialCommManager::Config mgr_cfg{};
-    if (uart_mgr.init(mgr_cfg) != errCode::OK) { ESP_LOGE(TAG, "uart_mgr init fail"); return; }
+    if (uart_mgr.init() != errCode::OK) { ESP_LOGE(TAG, "uart_mgr init fail"); return; }
 
     /* Subscribe to velocity commands arriving from PC via UART */
     static SerialCommTopic<RobotVelocityCmd> uart_vel_sub;
@@ -311,12 +303,12 @@ extern "C" void app_main(void) {
 
     /* ── SerialComm stack B: ESP-NOW (Bridge ↔ Robots) ──────────────── */
     static SerialComm espnow_comm(&espnow);
-    if (espnow_comm.init(sc_cfg)  != errCode::OK) { ESP_LOGE(TAG, "espnow_comm init fail");  return; }
-    if (espnow_comm.start()       != errCode::OK) { ESP_LOGE(TAG, "espnow_comm start fail"); return; }
+    if (espnow_comm.init()  != errCode::OK) { ESP_LOGE(TAG, "espnow_comm init fail");  return; }
+    if (espnow_comm.start() != errCode::OK) { ESP_LOGE(TAG, "espnow_comm start fail"); return; }
 
     static SerialCommManager espnow_mgr(&espnow_comm);
     g_espnow_mgr = &espnow_mgr;
-    if (espnow_mgr.init(mgr_cfg) != errCode::OK) { ESP_LOGE(TAG, "espnow_mgr init fail"); return; }
+    if (espnow_mgr.init() != errCode::OK) { ESP_LOGE(TAG, "espnow_mgr init fail"); return; }
 
     /* Subscribe to telemetry arriving from robots via ESP-NOW */
     static SerialCommTopic<RobotTelemetry> espnow_tel_sub;
@@ -402,10 +394,7 @@ extern "C" void app_main(void) {
 
     static ESPNowTransport espnow(espnow_hw);
 
-    ISerialCommTransport::Config espnow_cfg{};
-    espnow_cfg.timeout_ms = 500;
-
-    if (espnow.init(espnow_cfg) != errCode::OK) { ESP_LOGE(TAG, "ESP-NOW init fail"); return; }
+    if (espnow.init() != errCode::OK) { ESP_LOGE(TAG, "ESP-NOW init fail"); return; }
 
     /* ── Register bridge as a peer ───────────────────────────────────
      *
@@ -437,13 +426,11 @@ extern "C" void app_main(void) {
 
     /* ── SerialComm + Manager ───────────────────────────────────────── */
     static SerialComm comm(&espnow);
-    SerialComm::Config sc_cfg{};
-    if (comm.init(sc_cfg)  != errCode::OK) { ESP_LOGE(TAG, "comm init fail");  return; }
-    if (comm.start()       != errCode::OK) { ESP_LOGE(TAG, "comm start fail"); return; }
+    if (comm.init()  != errCode::OK) { ESP_LOGE(TAG, "comm init fail");  return; }
+    if (comm.start() != errCode::OK) { ESP_LOGE(TAG, "comm start fail"); return; }
 
     static SerialCommManager mgr(&comm);
-    SerialCommManager::Config mgr_cfg{};
-    if (mgr.init(mgr_cfg) != errCode::OK) { ESP_LOGE(TAG, "mgr init fail"); return; }
+    if (mgr.init() != errCode::OK) { ESP_LOGE(TAG, "mgr init fail"); return; }
 
     /* Subscribe to velocity commands from the bridge */
     static SerialCommTopic<RobotVelocityCmd> vel_sub;

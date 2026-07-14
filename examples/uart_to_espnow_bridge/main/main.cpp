@@ -210,10 +210,7 @@ extern "C" void app_main(void) {
 
     static UARTTransport uart(uart_hw);
 
-    ISerialCommTransport::Config uart_cfg{};
-    uart_cfg.timeout_ms = 500;
-
-    if (uart.init(uart_cfg) != errCode::OK) {
+    if (uart.init() != errCode::OK) {
         ESP_LOGE(TAG, "UART init failed"); return;
     }
     if (uart.start() != errCode::OK) {
@@ -240,10 +237,7 @@ extern "C" void app_main(void) {
 
     static ESPNowTransport espnow(espnow_hw);
 
-    ISerialCommTransport::Config espnow_cfg{};
-    espnow_cfg.timeout_ms = 1000;
-
-    if (espnow.init(espnow_cfg) != errCode::OK) {
+    if (espnow.init() != errCode::OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed"); return;
     }
 
@@ -286,8 +280,7 @@ extern "C" void app_main(void) {
     multi.add_transport(&uart,   uart_slot);
     multi.add_transport(&espnow, espnow_slot);
 
-    ISerialCommTransport::Config multi_cfg{};
-    if (multi.init(multi_cfg) != errCode::OK) {
+    if (multi.init() != errCode::OK) {
         ESP_LOGE(TAG, "MultiTransport init failed"); return;
     }
     if (multi.start() != errCode::OK) {
@@ -297,8 +290,7 @@ extern "C" void app_main(void) {
     /* ── SerialComm ───────────────────────────────────────────────── */
     static SerialComm comm(&multi);
 
-    SerialComm::Config sc_cfg{};
-    if (comm.init(sc_cfg) != errCode::OK) {
+    if (comm.init() != errCode::OK) {
         ESP_LOGE(TAG, "SerialComm init failed"); return;
     }
     if (comm.start() != errCode::OK) {
@@ -309,10 +301,7 @@ extern "C" void app_main(void) {
     static SerialCommManager mgr(&comm);
     g_mgr = &mgr;
 
-    SerialCommManager::Config mgr_cfg{};
-    mgr_cfg.service_timeout_ms = 2000;
-
-    if (mgr.init(mgr_cfg) != errCode::OK) {
+    if (mgr.init() != errCode::OK) {
         ESP_LOGE(TAG, "SerialCommManager init failed"); return;
     }
 
