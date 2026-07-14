@@ -175,7 +175,13 @@ class SerialCommManager {
          * @param   cfg Runtime configuration
          * @return  Result code
          */
-        errCode init( const Config& cfg);
+        errCode init( const Config& cfg );
+
+        /**
+         * @brief   Initialize middleware manager with default configuration
+         * @return  Result code
+         */
+        errCode init() { return init(Config{}); }
 
         /**
          * @brief   Start middleware manager

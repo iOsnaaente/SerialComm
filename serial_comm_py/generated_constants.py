@@ -15,18 +15,28 @@ from ._types import DeliveryMode
 # Command IDs
 # ---------------------------------------------------------------------------
 
-LEGACY_STATUS_ID        = 0x09   # LegacyStatus   (@deprecated)
-ROBOT_VELOCITY_CMD_ID   = 0x10   # RobotVelocityCmd
-ROBOT_TELEMETRY_ID      = 0x11   # RobotTelemetry
+SERVO_STATUS_ID = 0x20
+CUSTOM_DATA_ID = 0x13
+SERVO_STATE_ID = 0x21
+ROBOT_TELEMETRY_ID = 0x11
+DISCOVERY_HELLO_ID = 0x12
+LEGACY_STATUS_ID = 0x09   # (@deprecated)
+ROBOT_VELOCITY_CMD_ID = 0x10
+SET_MODE_ID = 0x14
 
 # ---------------------------------------------------------------------------
 # Delivery modes  (mirrors DELIVERY_MODE constexpr in generated headers)
 # ---------------------------------------------------------------------------
 
 DELIVERY_MODE: dict[int, DeliveryMode] = {
-    LEGACY_STATUS_ID:       DeliveryMode.BEST_EFFORT,
-    ROBOT_VELOCITY_CMD_ID:  DeliveryMode.BEST_EFFORT,
-    ROBOT_TELEMETRY_ID:     DeliveryMode.BEST_EFFORT,
+    SERVO_STATUS_ID: DeliveryMode.BEST_EFFORT,
+    CUSTOM_DATA_ID: DeliveryMode.BEST_EFFORT,
+    SERVO_STATE_ID: DeliveryMode.BEST_EFFORT,
+    ROBOT_TELEMETRY_ID: DeliveryMode.BEST_EFFORT,
+    DISCOVERY_HELLO_ID: DeliveryMode.BEST_EFFORT,
+    LEGACY_STATUS_ID: DeliveryMode.BEST_EFFORT,
+    ROBOT_VELOCITY_CMD_ID: DeliveryMode.BEST_EFFORT,
+    SET_MODE_ID: DeliveryMode.RELIABLE,
 }
 
 # ---------------------------------------------------------------------------
@@ -34,6 +44,7 @@ DELIVERY_MODE: dict[int, DeliveryMode] = {
 # ---------------------------------------------------------------------------
 
 MAX_RATE_HZ: dict[int, float] = {
+    CUSTOM_DATA_ID: 5.0,
     ROBOT_VELOCITY_CMD_ID: 33.0,
 }
 
@@ -49,9 +60,9 @@ RETAIN_COMMANDS: frozenset[int] = frozenset({
 # @timeout_ms  (mirrors TIMEOUT_MS constexpr; used by call_service)
 # ---------------------------------------------------------------------------
 
-# SetMotor does not have a fixed @id in the IDL example, so no entry here.
-# Add:  TIMEOUT_MS[SET_MOTOR_ID] = 500  once you assign it an @id.
-TIMEOUT_MS: dict[int, int] = {}
+TIMEOUT_MS: dict[int, int] = {
+    SET_MODE_ID: 1000,
+}
 
 # ---------------------------------------------------------------------------
 # @version  (mirrors SCHEMA_VERSION constexpr)
@@ -62,7 +73,7 @@ SCHEMA_VERSION: dict[int, int] = {
 }
 
 # ---------------------------------------------------------------------------
-# @deprecated  (informational — types listed here should not be used in new code)
+# @deprecated  (informational)
 # ---------------------------------------------------------------------------
 
 DEPRECATED_COMMANDS: frozenset[int] = frozenset({

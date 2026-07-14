@@ -327,7 +327,7 @@ class SerialCommClient:
             frame = _encode_packet(seq, cmd_int, payload)
             self._write_frame(frame)
             if delivery_mode == DeliveryMode.RELIABLE:
-                self._serial.flush()  # drain OS TX buffer
+                self._flush_tx()
             with self._stats_lock:
                 self._stats["tx_packets"] += 1
             log.debug(
@@ -382,7 +382,7 @@ class SerialCommClient:
         try:
             frame = _encode_packet(seq, cmd_int, payload)
             self._write_frame(frame)
-            self._serial.flush()   # reliable: drain OS TX buffer before waiting
+            self._flush_tx()   # reliable: drain TX buffer before waiting for reply
             with self._stats_lock:
                 self._stats["tx_packets"] += 1
             log.debug(
@@ -525,6 +525,11 @@ class SerialCommClient:
         assert self._serial is not None
         with self._tx_lock:
             self._serial.write(frame)
+
+    def _flush_tx(self) -> None:
+        """Drain the OS TX buffer.  Override to no-op for non-serial transports."""
+        if self._serial is not None:
+            self._serial.flush()
 
     # ------------------------------------------------------------------
     # Private — RX loop (background thread)

@@ -200,10 +200,7 @@ extern "C" void app_main(void) {
     uart_transport.set_event_callback(transport_event_cb,
                                       const_cast<char*>("UART"));
 
-    ISerialCommTransport::Config uart_cfg{};
-    uart_cfg.timeout_ms = 500;
-
-    if (uart_transport.init(uart_cfg) != errCode::OK) {
+    if (uart_transport.init() != errCode::OK) {
         ESP_LOGE(TAG, "UART transport init failed");
         return;
     }
@@ -224,10 +221,7 @@ extern "C" void app_main(void) {
     espnow_transport.set_event_callback(transport_event_cb,
                                         const_cast<char*>("ESP-NOW"));
 
-    ISerialCommTransport::Config espnow_cfg{};
-    espnow_cfg.timeout_ms = 500;
-
-    if (espnow_transport.init(espnow_cfg) != errCode::OK) {
+    if (espnow_transport.init() != errCode::OK) {
         ESP_LOGE(TAG, "ESP-NOW transport init failed");
         return;
     }
@@ -248,8 +242,7 @@ extern "C" void app_main(void) {
     // Slot 1: ESP-NOW — receive and transmit
     multi.add_transport(&espnow_transport, both_rxtx);
 
-    ISerialCommTransport::Config multi_cfg{};
-    if (multi.init(multi_cfg) != errCode::OK) {
+    if (multi.init() != errCode::OK) {
         ESP_LOGE(TAG, "MultiTransport init failed");
         return;
     }
@@ -264,8 +257,7 @@ extern "C" void app_main(void) {
     // -----------------------------------------------------------------------
     static SerialComm comm(&multi);     // <-- only change vs. single transport
 
-    SerialComm::Config sc_cfg{};
-    if (comm.init(sc_cfg) != errCode::OK) {
+    if (comm.init() != errCode::OK) {
         ESP_LOGE(TAG, "SerialComm init failed");
         return;
     }
@@ -279,10 +271,7 @@ extern "C" void app_main(void) {
     // -----------------------------------------------------------------------
     static SerialCommManager mgr(&comm);
 
-    SerialCommManager::Config mgr_cfg{};
-    mgr_cfg.service_timeout_ms = 2000;
-
-    if (mgr.init(mgr_cfg) != errCode::OK) {
+    if (mgr.init() != errCode::OK) {
         ESP_LOGE(TAG, "SerialCommManager init failed");
         return;
     }

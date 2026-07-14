@@ -2,21 +2,26 @@
 04_generator_usage.py — Using the IDL generator in a Python project
 
 The SerialComm code generator (user_app/generate.py) processes IDL files
-and outputs C++ headers.  Python projects consume the same IDL through
-two complementary mechanisms:
+and outputs both C++ headers AND Python serializers.  Python projects
+consume the same IDL through three complementary mechanisms:
 
-  1. generated_constants.py  — auto-maintained file with command IDs,
+  1. generated_constants.py  — auto-generated file with command IDs,
        delivery modes, retain flags, schema versions, and rate ceilings.
        Import it instead of hard-coding magic numbers in your scripts.
 
-  2. struct.pack / struct.unpack  — serialize/deserialize fields manually
-       following the same byte order declared in the IDL (@little / @big).
+  2. Python serializers (include/serial_comm/generated/python/)  — auto-
+       generated pack_*(msg: dict) -> bytes and unpack_*(data) -> (dict, int)
+       functions that mirror the C++ SerialCommSerializer<T> specializations.
+       No more manual struct.pack — the generator handles it.
+
+  3. struct.pack / struct.unpack  — still usable for ad-hoc testing or
+       types that don't have IDL files.
 
 This example shows the complete workflow end-to-end:
 
   Step 1 — Write your IDL files in user_app/
   Step 2 — Run the generator
-  Step 3 — Use the generated constants and pack/unpack in Python
+  Step 3 — Use the generated constants and Python serializers
 
 ──────────────────────────────────────────────────────────────────────────
 Step 1: IDL files (user_app/event/MyStatus.event)
@@ -40,13 +45,16 @@ Step 2: Run the generator from the project root
         --output include/serial_comm/generated
 
     Generated files:
-        include/serial_comm/generated/event/my_status.hpp
-        include/serial_comm/generated/serializers/my_status_serializer.hpp
-        include/serial_comm/generated/generated_serializers.hpp
-        include/serial_comm/generated/manifest.json
+        include/serial_comm/generated/event/my_status.hpp       ← C++ struct
+        include/serial_comm/generated/serializers/...           ← C++ serializer
+        include/serial_comm/generated/python/my_status.py       ← Python serializer
+        include/serial_comm/generated/python/__init__.py        ← aggregator
+        include/serial_comm/generated/generated_serializers.hpp ← C++ aggregator
+        include/serial_comm/generated/manifest.json             ← metadata
+        serial_comm_py/generated_constants.py                   ← Python IDs
 
 ──────────────────────────────────────────────────────────────────────────
-Step 3: Use the constants in Python
+Step 3: Use the constants and generated serializers
 ──────────────────────────────────────────────────────────────────────────
     (see code below)
 
@@ -58,17 +66,19 @@ from __future__ import annotations
 
 import json
 import os
-import struct
 import sys
 import time
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+_REPO_ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
+sys.path.insert(0, _REPO_ROOT)
+# Auto-generated Python serializers
+sys.path.insert(0, os.path.join(_REPO_ROOT, "include", "serial_comm", "generated"))
 
 from serial_comm_py import SerialCommClient, Command, Packet, DeliveryMode
 from serial_comm_py.generated_constants import (
-    # Command IDs  (C++: static constexpr uint16_t ROBOTVELOCITYCMD_ID = 0x10)
+    # Command IDs  (C++: static constexpr uint16_t ROBOT_VELOCITY_CMD_ID = 0x10)
     ROBOT_VELOCITY_CMD_ID,
     ROBOT_TELEMETRY_ID,
 
@@ -84,15 +94,16 @@ from serial_comm_py.generated_constants import (
     # Schema versions  (C++: static constexpr uint8_t SCHEMA_VERSION = 1)
     SCHEMA_VERSION,
 )
+from python import pack_robot_velocity_cmd, unpack_robot_telemetry
 
 # ---------------------------------------------------------------------------
 # How the generated C++ constexprs map to Python
 # ---------------------------------------------------------------------------
 #
 #  C++ (robot_velocity_cmd.hpp):
-#    static constexpr uint16_t ROBOTVELOCITYCMD_ID   = 0x10;
-#    static constexpr DeliveryMode DELIVERY_MODE      = DeliveryMode::BEST_EFFORT;
-#    static constexpr float MAX_RATE_HZ               = 33.0f;
+#    static constexpr uint16_t ROBOT_VELOCITY_CMD_ID = 0x10;
+#    static constexpr DeliveryMode DELIVERY_MODE     = DeliveryMode::BEST_EFFORT;
+#    static constexpr float MAX_RATE_HZ              = 33.0f;
 #
 #  Python (generated_constants.py):
 #    ROBOT_VELOCITY_CMD_ID = 0x10
@@ -100,9 +111,9 @@ from serial_comm_py.generated_constants import (
 #    MAX_RATE_HZ[0x10]     = 33.0
 #
 #  C++ (robot_telemetry.hpp):
-#    static constexpr uint16_t ROBOTTELEMETRY_ID = 0x11;
-#    static constexpr bool RETAIN                = true;
-#    static constexpr uint8_t SCHEMA_VERSION     = 1;
+#    static constexpr uint16_t ROBOT_TELEMETRY_ID = 0x11;
+#    static constexpr bool RETAIN                 = true;
+#    static constexpr uint8_t SCHEMA_VERSION      = 1;
 #
 #  Python (generated_constants.py):
 #    ROBOT_TELEMETRY_ID    = 0x11
@@ -110,39 +121,20 @@ from serial_comm_py.generated_constants import (
 #    SCHEMA_VERSION[0x11]  = 1
 
 # ---------------------------------------------------------------------------
-# Serialization format strings derived from the IDL field list
+# Serializers — generated by the IDL generator, no manual struct.pack needed
 # ---------------------------------------------------------------------------
 #
-# IDL type → struct.pack format character (always little-endian '<'):
-#   uint8   → 'B'    int8    → 'b'
-#   uint16  → 'H'    int16   → 'h'
-#   uint32  → 'I'    int32   → 'i'
-#   float32 → 'f'    float64 → 'd'
-#   bool    → '?'    string  → (not supported by struct — use bytes manually)
+# Generated file: include/serial_comm/generated/python/robot_velocity_cmd.py
+#   def pack_robot_velocity_cmd(msg: dict) -> bytes   # 9 bytes
+#   def unpack_robot_velocity_cmd(data, offset=0) -> (dict, bytes_consumed)
 #
-# RobotVelocityCmd: uint8 robot_id, float32 vl, float32 vr
-VEL_CMD_FMT  = '<Bff'   # 9 bytes
-VEL_CMD_SIZE = struct.calcsize(VEL_CMD_FMT)
-
-# RobotTelemetry: uint8 robot_id, float32 ax, ay, gz, vl, vr, bool ball_detected
-TEL_FMT  = '<Bfffff?'   # 22 bytes
-TEL_SIZE = struct.calcsize(TEL_FMT)
-
-
-def pack_vel_cmd(robot_id: int, vl: float, vr: float) -> bytes:
-    return struct.pack(VEL_CMD_FMT, robot_id & 0xFF, vl, vr)
-
-
-def unpack_telemetry(payload: bytes) -> dict | None:
-    if len(payload) < TEL_SIZE:
-        return None
-    robot_id, ax, ay, gz, vl, vr, ball = struct.unpack_from(TEL_FMT, payload)
-    return {
-        "robot_id": robot_id,
-        "ax": ax, "ay": ay, "gz": gz,
-        "vl_measured": vl, "vr_measured": vr,
-        "ball_detected": bool(ball),
-    }
+# Generated file: include/serial_comm/generated/python/robot_telemetry.py
+#   def pack_robot_telemetry(msg: dict) -> bytes       # 22 bytes
+#   def unpack_robot_telemetry(data, offset=0) -> (dict, bytes_consumed)
+#
+# Example:
+#   payload = pack_robot_velocity_cmd({"robot_id": 0, "vl": 1.0, "vr": 1.0})
+#   msg, _ = unpack_robot_telemetry(pkt.payload)
 
 
 # ---------------------------------------------------------------------------
@@ -183,13 +175,12 @@ def run_demo(client: SerialCommClient) -> None:
         print(f"Retain enabled: cmd=0x{int(tel_cmd):02X}  schema_version={SCHEMA_VERSION.get(int(tel_cmd), 'n/a')}")
 
     def on_telemetry(pkt: Packet) -> None:
-        tel = unpack_telemetry(pkt.payload)
-        if tel:
-            print(
-                f"  TEL  robot={tel['robot_id']}  "
-                f"ax={tel['ax']:.2f} ay={tel['ay']:.2f} gz={tel['gz']:.2f}  "
-                f"ball={'YES' if tel['ball_detected'] else 'no'}"
-            )
+        tel, _ = unpack_robot_telemetry(pkt.payload)
+        print(
+            f"  TEL  robot={tel['robot_id']}  "
+            f"ax={tel['ax']:.2f} ay={tel['ay']:.2f} gz={tel['gz']:.2f}  "
+            f"ball={'YES' if tel['ball_detected'] else 'no'}"
+        )
 
     client.subscribe(tel_cmd, on_telemetry)
 
@@ -197,7 +188,7 @@ def run_demo(client: SerialCommClient) -> None:
     tick = 0
     try:
         while True:
-            payload = pack_vel_cmd(robot_id=0, vl=1.0, vr=1.0)
+            payload = pack_robot_velocity_cmd({"robot_id": 0, "vl": 1.0, "vr": 1.0})
             rc = client.publish(
                 vel_cmd,
                 payload,
@@ -208,9 +199,8 @@ def run_demo(client: SerialCommClient) -> None:
             # Read last telemetry from retain cache (no blocking, no callback needed)
             last = client.get_last(tel_cmd)
             if last:
-                tel = unpack_telemetry(last)
-                if tel:
-                    print(f"  LAST TEL (cached)  robot={tel['robot_id']}  ball={'YES' if tel['ball_detected'] else 'no'}")
+                tel, _ = unpack_robot_telemetry(last)
+                print(f"  LAST TEL (cached)  robot={tel['robot_id']}  ball={'YES' if tel['ball_detected'] else 'no'}")
 
             tick += 1
             time.sleep(1.0 / 33.0)    # 33 Hz

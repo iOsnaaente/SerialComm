@@ -4,15 +4,17 @@
 SerialComm IDL Generator
 
 Features:
-    - Struct/Event/Request/Mission parsing
+    - Struct/Event/Request/Mission/Enum parsing
     - Automatic dependency resolution
-    - Automatic serializer generation
+    - Automatic C++ serializer generation
+    - Automatic Python pack/unpack generation
     - DynamicArray support
     - Little/Big endian metadata
     - Duplicate ID detection
     - Max serialized size generation
     - Reflection metadata generation
     - Runtime serialization helpers generation
+    - Enum class generation (C++ enum class + Python IntEnum)
 
 Author:
     Bruno Gabriel Flores Sampaio
@@ -66,14 +68,67 @@ TYPE_SIZE_MAP = {
 }
 
 
+# Python struct format character per IDL primitive type
+PYTHON_FMT_MAP = {
+    "bool":    "?",
+    "int8":    "b",
+    "uint8":   "B",
+    "int16":   "h",
+    "uint16":  "H",
+    "int32":   "i",
+    "uint32":  "I",
+    "float32": "f",
+    "float64": "d",
+}
+
+# Wire byte size per IDL primitive type
+PYTHON_SIZE_MAP = {
+    "bool":    1,
+    "int8":    1,
+    "uint8":   1,
+    "int16":   2,
+    "uint16":  2,
+    "int32":   4,
+    "uint32":  4,
+    "float32": 4,
+    "float64": 8,
+}
+
+
 USED_IDS = {}
 MANIFEST = []
+
+# Enum types registered during .enum processing; keyed by PascalCase name.
+# Value: {"base": "uint8", "values": {"IDLE": 0, ...}}
+KNOWN_ENUMS = {}
+
+
+def make_manifest_entry(name: str, msg_type: str, metadata: dict) -> dict:
+    """Build a rich MANIFEST entry from a parsed metadata dict."""
+    entry = {
+        "name":          name,
+        "type":          msg_type,
+        "id":            metadata.get("id", None),
+        "delivery_mode": metadata.get("delivery_mode", "BEST_EFFORT"),
+        "deprecated":    bool(metadata.get("deprecated", False)),
+        "retain":        bool(metadata.get("retain", False)),
+    }
+    if "max_rate_hz" in metadata:
+        entry["max_rate_hz"] = float(metadata["max_rate_hz"])
+    if "timeout_ms" in metadata:
+        entry["timeout_ms"] = int(metadata["timeout_ms"])
+    if "version" in metadata:
+        entry["version"] = int(metadata["version"])
+    return entry
 
 
 # ============================================================================
 # GENERATED SERIALIZER REGISTRY
 # ============================================================================
 generated_serializer_includes = []
+
+# Python modules to import in __init__.py: list of (snake_name, symbols)
+generated_python_modules = []
 
 
 # =============================================================================
@@ -91,11 +146,15 @@ def snake_case(name: str):
         name
     )
 
-    return re.sub(
+    s2 = re.sub(
         r"([a-z0-9])([A-Z])",
         r"\1_\2",
         s1
     ).lower()
+
+    # Collapse runs of underscores that arise from mixed PascalCase+underscore
+    # inputs such as "SetMotor_Request" → "set_motor__request" → "set_motor_request"
+    return re.sub(r"_+", "_", s2)
 
 
 def pascal_case(name: str):
@@ -124,7 +183,7 @@ def read_lines(path: Path):
             line.strip()
             for line in f.readlines()
             if line.strip() and
-            not line.startswith("#")
+            not line.strip().startswith("#")
         ]
 
 
@@ -358,6 +417,17 @@ def field_max_size(field):
     if base == "string":
         return "0 /* dynamic */"
 
+    # ENUM TYPE: fixed size based on underlying base type
+    if base in KNOWN_ENUMS:
+        enum_base = KNOWN_ENUMS[base]["base"]
+        elem_size = TYPE_SIZE_MAP.get(enum_base, 1)
+        if is_fixed_array(field_type):
+            count = fixed_array_size(field_type)
+            return elem_size * count
+        if is_dynamic_array(field_type):
+            return "0 /* dynamic */"
+        return elem_size
+
     # FIXED ARRAY
     if is_fixed_array(field_type):
 
@@ -394,7 +464,7 @@ def field_max_size(field):
 
         return TYPE_SIZE_MAP[base]
 
-    # CUSTOM
+    # CUSTOM STRUCT
     base_pascal = pascal_case(base)
     return f"{base_pascal}::MAX_SERIALIZED_SIZE"
 
@@ -419,10 +489,15 @@ def generate_header(dependencies):
     out.append("")
 
     for dep in sorted(dependencies):
-
-        out.append(
-            f'#include "serial_comm/generated/struct/{snake_case(dep)}.hpp"'
-        )
+        # Enum types get their own include directory
+        if dep in KNOWN_ENUMS:
+            out.append(
+                f'#include "serial_comm/generated/enum/{snake_case(dep)}.hpp"'
+            )
+        else:
+            out.append(
+                f'#include "serial_comm/generated/struct/{snake_case(dep)}.hpp"'
+            )
 
     out.append("")
 
@@ -598,8 +673,288 @@ def generate_serializer(name, fields, metadata, include_path=None):
 
 
 # =============================================================================
+# PYTHON SERIALIZER GENERATOR
+# =============================================================================
+
+def generate_python_serializer(name, fields, metadata):
+    """Generate a Python pack/unpack module for a single struct/event/request type."""
+    snake = snake_case(name)
+    endian = "<" if metadata.get("endian", "little") == "little" else ">"
+
+    out = []
+    out.append('"""')
+    out.append(f"Auto-generated Python serializer for {name}")
+    out.append("Do not edit — regenerate with generate.py")
+    out.append('"""')
+    out.append("import struct")
+    out.append("")
+
+    # Imports for embedded struct dependencies (not primitives, not enums)
+    struct_deps_seen = []
+    for field in fields:
+        base = extract_base_type(field["type"])
+        if is_custom_type(field["type"]) and base not in KNOWN_ENUMS:
+            dep_snake = snake_case(base)
+            if dep_snake not in struct_deps_seen:
+                struct_deps_seen.append(dep_snake)
+
+    for dep_snake in struct_deps_seen:
+        out.append(f"from .{dep_snake} import pack_{dep_snake}, unpack_{dep_snake}")
+    if struct_deps_seen:
+        out.append("")
+
+    # ---- pack function --------------------------------------------------
+    out.append(f"def pack_{snake}(msg: dict) -> bytes:")
+    out.append(f'    """Serialize {name} to bytes (little-endian wire format)."""')
+    out.append("    buf = b''")
+
+    for field in fields:
+        fn = field["name"]
+        ft = field["type"]
+        base = extract_base_type(ft)
+
+        if base == "string":
+            out.append(f"    _s = msg['{fn}']")
+            out.append(f"    if isinstance(_s, str): _s = _s.encode('utf-8')")
+            out.append(f"    buf += struct.pack('{endian}H', len(_s)) + _s")
+
+        elif is_fixed_array(ft):
+            count = fixed_array_size(ft)
+            if base in PYTHON_FMT_MAP:
+                fmt = PYTHON_FMT_MAP[base]
+                out.append(f"    for _v in msg['{fn}'][:{count}]:")
+                out.append(f"        buf += struct.pack('{endian}{fmt}', _v)")
+            elif base in KNOWN_ENUMS:
+                efmt = PYTHON_FMT_MAP.get(KNOWN_ENUMS[base]["base"], "B")
+                out.append(f"    for _v in msg['{fn}'][:{count}]:")
+                out.append(f"        buf += struct.pack('{endian}{efmt}', int(_v))")
+            else:
+                ds = snake_case(base)
+                out.append(f"    for _v in msg['{fn}'][:{count}]:")
+                out.append(f"        buf += pack_{ds}(_v)")
+
+        elif is_dynamic_array(ft):
+            if base in PYTHON_FMT_MAP:
+                fmt = PYTHON_FMT_MAP[base]
+                out.append(f"    _arr = msg['{fn}']")
+                out.append(f"    buf += struct.pack('{endian}H', len(_arr))")
+                out.append(f"    for _v in _arr:")
+                out.append(f"        buf += struct.pack('{endian}{fmt}', _v)")
+            elif base in KNOWN_ENUMS:
+                efmt = PYTHON_FMT_MAP.get(KNOWN_ENUMS[base]["base"], "B")
+                out.append(f"    _arr = msg['{fn}']")
+                out.append(f"    buf += struct.pack('{endian}H', len(_arr))")
+                out.append(f"    for _v in _arr:")
+                out.append(f"        buf += struct.pack('{endian}{efmt}', int(_v))")
+            else:
+                ds = snake_case(base)
+                out.append(f"    _arr = msg['{fn}']")
+                out.append(f"    buf += struct.pack('{endian}H', len(_arr))")
+                out.append(f"    for _v in _arr:")
+                out.append(f"        buf += pack_{ds}(_v)")
+
+        elif base in PYTHON_FMT_MAP:
+            fmt = PYTHON_FMT_MAP[base]
+            out.append(f"    buf += struct.pack('{endian}{fmt}', msg['{fn}'])")
+        elif base in KNOWN_ENUMS:
+            efmt = PYTHON_FMT_MAP.get(KNOWN_ENUMS[base]["base"], "B")
+            out.append(f"    buf += struct.pack('{endian}{efmt}', int(msg['{fn}']))")
+        else:
+            ds = snake_case(base)
+            out.append(f"    buf += pack_{ds}(msg['{fn}'])")
+
+    out.append("    return buf")
+    out.append("")
+
+    # ---- unpack function ------------------------------------------------
+    out.append(f"def unpack_{snake}(data: bytes, offset: int = 0):")
+    out.append(f'    """Deserialize {name} from bytes. Returns (dict, bytes_consumed)."""')
+    out.append("    msg = {}")
+    out.append("    _start = offset")
+
+    for field in fields:
+        fn = field["name"]
+        ft = field["type"]
+        base = extract_base_type(ft)
+
+        if base == "string":
+            out.append(f"    _len, = struct.unpack_from('{endian}H', data, offset)")
+            out.append(f"    offset += 2")
+            out.append(f"    msg['{fn}'] = data[offset:offset + _len].decode('utf-8')")
+            out.append(f"    offset += _len")
+
+        elif is_fixed_array(ft):
+            count = fixed_array_size(ft)
+            if base in PYTHON_FMT_MAP:
+                fmt = PYTHON_FMT_MAP[base]
+                sz = PYTHON_SIZE_MAP[base]
+                out.append(f"    msg['{fn}'] = []")
+                out.append(f"    for _i in range({count}):")
+                out.append(f"        _v, = struct.unpack_from('{endian}{fmt}', data, offset)")
+                out.append(f"        offset += {sz}")
+                out.append(f"        msg['{fn}'].append(_v)")
+            elif base in KNOWN_ENUMS:
+                efmt = PYTHON_FMT_MAP.get(KNOWN_ENUMS[base]["base"], "B")
+                esz = PYTHON_SIZE_MAP.get(KNOWN_ENUMS[base]["base"], 1)
+                out.append(f"    msg['{fn}'] = []")
+                out.append(f"    for _i in range({count}):")
+                out.append(f"        _v, = struct.unpack_from('{endian}{efmt}', data, offset)")
+                out.append(f"        offset += {esz}")
+                out.append(f"        msg['{fn}'].append(_v)")
+            else:
+                ds = snake_case(base)
+                out.append(f"    msg['{fn}'] = []")
+                out.append(f"    for _i in range({count}):")
+                out.append(f"        _item, _sz = unpack_{ds}(data, offset)")
+                out.append(f"        offset += _sz")
+                out.append(f"        msg['{fn}'].append(_item)")
+
+        elif is_dynamic_array(ft):
+            if base in PYTHON_FMT_MAP:
+                fmt = PYTHON_FMT_MAP[base]
+                sz = PYTHON_SIZE_MAP[base]
+                out.append(f"    _count, = struct.unpack_from('{endian}H', data, offset)")
+                out.append(f"    offset += 2")
+                out.append(f"    msg['{fn}'] = []")
+                out.append(f"    for _i in range(_count):")
+                out.append(f"        _v, = struct.unpack_from('{endian}{fmt}', data, offset)")
+                out.append(f"        offset += {sz}")
+                out.append(f"        msg['{fn}'].append(_v)")
+            elif base in KNOWN_ENUMS:
+                efmt = PYTHON_FMT_MAP.get(KNOWN_ENUMS[base]["base"], "B")
+                esz = PYTHON_SIZE_MAP.get(KNOWN_ENUMS[base]["base"], 1)
+                out.append(f"    _count, = struct.unpack_from('{endian}H', data, offset)")
+                out.append(f"    offset += 2")
+                out.append(f"    msg['{fn}'] = []")
+                out.append(f"    for _i in range(_count):")
+                out.append(f"        _v, = struct.unpack_from('{endian}{efmt}', data, offset)")
+                out.append(f"        offset += {esz}")
+                out.append(f"        msg['{fn}'].append(_v)")
+            else:
+                ds = snake_case(base)
+                out.append(f"    _count, = struct.unpack_from('{endian}H', data, offset)")
+                out.append(f"    offset += 2")
+                out.append(f"    msg['{fn}'] = []")
+                out.append(f"    for _i in range(_count):")
+                out.append(f"        _item, _sz = unpack_{ds}(data, offset)")
+                out.append(f"        offset += _sz")
+                out.append(f"        msg['{fn}'].append(_item)")
+
+        elif base in PYTHON_FMT_MAP:
+            fmt = PYTHON_FMT_MAP[base]
+            sz = PYTHON_SIZE_MAP[base]
+            out.append(f"    msg['{fn}'], = struct.unpack_from('{endian}{fmt}', data, offset)")
+            out.append(f"    offset += {sz}")
+        elif base in KNOWN_ENUMS:
+            efmt = PYTHON_FMT_MAP.get(KNOWN_ENUMS[base]["base"], "B")
+            esz = PYTHON_SIZE_MAP.get(KNOWN_ENUMS[base]["base"], 1)
+            out.append(f"    msg['{fn}'], = struct.unpack_from('{endian}{efmt}', data, offset)")
+            out.append(f"    offset += {esz}")
+        else:
+            ds = snake_case(base)
+            out.append(f"    _val, _sz = unpack_{ds}(data, offset)")
+            out.append(f"    offset += _sz")
+            out.append(f"    msg['{fn}'] = _val")
+
+    out.append("    return msg, offset - _start")
+    out.append("")
+
+    return "\n".join(out)
+
+
+# =============================================================================
 # FILE PROCESSORS
 # =============================================================================
+
+# =============================================================================
+# ENUM PROCESSOR
+# =============================================================================
+
+def process_enum(path: Path, output_dir: Path):
+    """Process a .enum IDL file → C++ enum class + Python IntEnum."""
+    raw_name = path.stem
+    name = pascal_case(raw_name)
+    lines = read_lines(path)
+    metadata, lines = parse_metadata(lines)
+    validate_metadata_ids(name, metadata)
+
+    # @base uint8 (default) controls the underlying C++ integer type
+    base_type = metadata.get("base", "uint8")
+    cpp_base = CPP_TYPE_MAP.get(base_type, "uint8_t")
+
+    # Parse "NAME = VALUE" lines; skip the optional type-name line
+    values = []
+    for line in lines:
+        m = re.match(r"([A-Z_][A-Z0-9_]*)\s*=\s*(-?\d+)", line)
+        if m:
+            values.append((m.group(1), int(m.group(2))))
+
+    # Register for use by Python/C++ generators that reference this enum as a field type
+    KNOWN_ENUMS[name] = {
+        "base": base_type,
+        "values": {k: v for k, v in values}
+    }
+
+    # ── C++ output ────────────────────────────────────────────────────────
+    enum_dir = output_dir / "enum"
+    ensure_dir(enum_dir)
+
+    cpp_lines = []
+    cpp_lines.append("#pragma once")
+    cpp_lines.append("")
+    cpp_lines.append("#include <stdint.h>")
+    cpp_lines.append("")
+
+    if metadata.get("deprecated"):
+        reason = f"SerialComm IDL: {name} is @deprecated"
+        cpp_lines.append(f'[[deprecated("{reason}")]]')
+
+    cpp_lines.append(f"enum class {name} : {cpp_base} {{")
+    for enum_name, enum_val in values:
+        cpp_lines.append(f"    {enum_name} = {enum_val},")
+    cpp_lines.append("};")
+
+    if "id" in metadata:
+        cpp_lines.append("")
+        cpp_lines.append(
+            f"static constexpr uint16_t {name.upper()}_ID = {metadata['id']};"
+        )
+
+    with open(enum_dir / f"{snake_case(name)}.hpp", "w") as f:
+        f.write("\n".join(cpp_lines))
+
+    # ── Python output ─────────────────────────────────────────────────────
+    py_dir = output_dir / "python"
+    ensure_dir(py_dir)
+
+    py_lines = []
+    py_lines.append('"""')
+    py_lines.append(f"Auto-generated Python enum for {name}")
+    py_lines.append("Do not edit — regenerate with generate.py")
+    py_lines.append('"""')
+    py_lines.append("from enum import IntEnum")
+    py_lines.append("")
+    py_lines.append(f"class {name}(IntEnum):")
+    for enum_name, enum_val in values:
+        py_lines.append(f"    {enum_name} = {enum_val}")
+    py_lines.append("")
+
+    py_file = snake_case(name)
+    with open(py_dir / f"{py_file}.py", "w") as f:
+        f.write("\n".join(py_lines))
+
+    generated_python_modules.append({
+        "file": py_file,
+        "symbols": [name],
+    })
+
+    entry = make_manifest_entry(name, "enum", metadata)
+    entry["base"] = base_type
+    MANIFEST.append(entry)
+
+    print(f"[GEN] Enum: {name}")
+
+
 def process_struct(path: Path, output_dir: Path):
     raw_name = path.stem
     name = pascal_case(raw_name)
@@ -637,11 +992,20 @@ def process_struct(path: Path, output_dir: Path):
             "deps": deps,
             "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_serializer.hpp"'
         })
-    MANIFEST.append({
-        "name": name,
-        "type": "struct",
-        "id": metadata.get("id", None)
+
+    # Python serializer
+    py_dir = output_dir / "python"
+    ensure_dir(py_dir)
+    py_code = generate_python_serializer(name, fields, metadata)
+    py_file = snake_case(name)
+    with open(py_dir / f"{py_file}.py", "w") as f:
+        f.write(py_code)
+    generated_python_modules.append({
+        "file": py_file,
+        "symbols": [f"pack_{py_file}", f"unpack_{py_file}"],
     })
+
+    MANIFEST.append(make_manifest_entry(name, "struct", metadata))
     print(f"[GEN] Struct: {name}")
 
 
@@ -772,11 +1136,31 @@ def process_request(path: Path, output_dir: Path):
             "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_response_serializer.hpp"'
         })
 
-    MANIFEST.append({
-        "name": name,
-        "type": "request",
-        "id": metadata.get("id", None)
+    # Python serializers for request/response
+    py_dir = output_dir / "python"
+    ensure_dir(py_dir)
+
+    req_py = generate_python_serializer(f"{name}_Request", req_fields, metadata)
+    res_py = generate_python_serializer(f"{name}_Response", res_fields, metadata)
+
+    req_py_file = f"{snake_case(name)}_request"
+    res_py_file = f"{snake_case(name)}_response"
+
+    with open(py_dir / f"{req_py_file}.py", "w") as f:
+        f.write(req_py)
+    with open(py_dir / f"{res_py_file}.py", "w") as f:
+        f.write(res_py)
+
+    generated_python_modules.append({
+        "file": req_py_file,
+        "symbols": [f"pack_{req_py_file}", f"unpack_{req_py_file}"],
     })
+    generated_python_modules.append({
+        "file": res_py_file,
+        "symbols": [f"pack_{res_py_file}", f"unpack_{res_py_file}"],
+    })
+
+    MANIFEST.append(make_manifest_entry(name, "request", metadata))
 
     print(f"[GEN] Request: {name}")
 
@@ -806,9 +1190,9 @@ def process_event(path: Path, output_dir: Path):
         f.write(header)
         f.write("\n\n")
         f.write(event_code)
-    serializer_code = generate_serializer( 
-        name, 
-        fields, 
+    serializer_code = generate_serializer(
+        name,
+        fields,
         metadata,
         f"serial_comm/generated/event/{snake_case(name)}.hpp"
     )
@@ -819,11 +1203,20 @@ def process_event(path: Path, output_dir: Path):
             "deps": deps,
             "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_serializer.hpp"'
         })
-    MANIFEST.append({
-        "name": name,
-        "type": "event",
-        "id": metadata.get("id", None)
+
+    # Python serializer
+    py_dir = output_dir / "python"
+    ensure_dir(py_dir)
+    py_code = generate_python_serializer(name, fields, metadata)
+    py_file = snake_case(name)
+    with open(py_dir / f"{py_file}.py", "w") as f:
+        f.write(py_code)
+    generated_python_modules.append({
+        "file": py_file,
+        "symbols": [f"pack_{py_file}", f"unpack_{py_file}"],
     })
+
+    MANIFEST.append(make_manifest_entry(name, "event", metadata))
     print(f"[GEN] Event: {name}")
 
 
@@ -925,11 +1318,24 @@ def process_mission(path: Path, output_dir: Path):
             "include": f'#include "serial_comm/generated/serializers/{snake_case(name)}_feedback_serializer.hpp"'
         })
 
-    MANIFEST.append({
-        "name": name,
-        "type": "mission",
-        "id": metadata.get("id", None)
-    })
+    # Python serializers
+    py_dir = output_dir / "python"
+    ensure_dir(py_dir)
+    for sub_name, sub_fields in [
+        (f"{name}_Goal",     goal_fields),
+        (f"{name}_Result",   result_fields),
+        (f"{name}_Feedback", feedback_fields),
+    ]:
+        py_code = generate_python_serializer(sub_name, sub_fields, metadata)
+        py_file = snake_case(sub_name)
+        with open(py_dir / f"{py_file}.py", "w") as f:
+            f.write(py_code)
+        generated_python_modules.append({
+            "file": py_file,
+            "symbols": [f"pack_{py_file}", f"unpack_{py_file}"],
+        })
+
+    MANIFEST.append(make_manifest_entry(name, "mission", metadata))
 
     print(f"[GEN] Mission: {name}")
 
@@ -1009,8 +1415,157 @@ def generate_manifest(output_dir):
             f.write(entry["include"] + "\n")
     print("[GEN] Serializer aggregator generated")
 
+    # ============================================================================
+    # PYTHON __init__.py AGGREGATOR
+    # ============================================================================
+    py_dir = output_dir / "python"
+    ensure_dir(py_dir)
+
+    init_lines = []
+    init_lines.append('"""')
+    init_lines.append("Auto-generated SerialComm Python bindings.")
+    init_lines.append("Import pack_*/unpack_* functions or enum classes directly.")
+    init_lines.append('"""')
+    init_lines.append("")
+    for mod in generated_python_modules:
+        symbols = ", ".join(mod["symbols"])
+        init_lines.append(f"from .{mod['file']} import {symbols}")
+    init_lines.append("")
+
+    with open(py_dir / "__init__.py", "w") as f:
+        f.write("\n".join(init_lines))
+
+    print("[GEN] Python __init__.py generated")
+
     with open( output_dir / "manifest.json", "w" ) as f:
         json.dump( MANIFEST, f, indent=4 )
+
+
+# =============================================================================
+# PYTHON CONSTANTS GENERATOR
+# =============================================================================
+
+def generate_python_constants(manifest: list, output_path: Path) -> None:
+    """
+    Write serial_comm_py/generated_constants.py from the current MANIFEST.
+    Only entries with an @id are emitted; types without an ID are skipped.
+    """
+    # Collect entries that have an ID
+    typed_entries = [e for e in manifest if e.get("id") is not None]
+
+    out = []
+    out.append('"""')
+    out.append("generated_constants.py — Auto-generated by user_app/generate.py")
+    out.append("")
+    out.append("Contains command IDs and IDL decorator metadata for all message types,")
+    out.append("so the Python side can mirror the C++ constexpr values without re-parsing")
+    out.append("the IDL files.")
+    out.append("")
+    out.append("DO NOT EDIT MANUALLY — regenerate with:")
+    out.append("    python3 user_app/generate.py --input user_app --output include/serial_comm/generated")
+    out.append('"""')
+    out.append("")
+    out.append("from ._types import DeliveryMode")
+    out.append("")
+
+    # --- IDs ---
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# Command IDs")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    for e in typed_entries:
+        name_upper = snake_case(e["name"]).upper()
+        # For requests, the ID covers both _Request and _Response; emit it once
+        raw_id = e["id"]
+        deprecated_note = "   # (@deprecated)" if e.get("deprecated") else ""
+        out.append(f"{name_upper}_ID = {raw_id}{deprecated_note}")
+    out.append("")
+
+    # --- Delivery modes ---
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# Delivery modes  (mirrors DELIVERY_MODE constexpr in generated headers)")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    out.append("DELIVERY_MODE: dict[int, DeliveryMode] = {")
+    for e in typed_entries:
+        name_upper = snake_case(e["name"]).upper()
+        dm = "DeliveryMode.RELIABLE" if e.get("delivery_mode") == "RELIABLE" else "DeliveryMode.BEST_EFFORT"
+        out.append(f"    {name_upper}_ID: {dm},")
+    out.append("}")
+    out.append("")
+
+    # --- max_rate_hz ---
+    rate_entries = [e for e in typed_entries if "max_rate_hz" in e]
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# @max_rate_hz  (mirrors MAX_RATE_HZ constexpr)")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    out.append("MAX_RATE_HZ: dict[int, float] = {")
+    for e in rate_entries:
+        name_upper = snake_case(e["name"]).upper()
+        out.append(f"    {name_upper}_ID: {e['max_rate_hz']},")
+    out.append("}")
+    out.append("")
+
+    # --- retain ---
+    retain_entries = [e for e in typed_entries if e.get("retain")]
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# @retain  (mirrors RETAIN constexpr)")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    retain_ids = ", ".join(
+        f"{e['name'].upper().replace(' ', '_')}_ID" for e in retain_entries
+    )
+    out.append(f"RETAIN_COMMANDS: frozenset[int] = frozenset({{")
+    for e in retain_entries:
+        name_upper = snake_case(e["name"]).upper()
+        out.append(f"    {name_upper}_ID,")
+    out.append("})")
+    out.append("")
+
+    # --- timeout_ms ---
+    timeout_entries = [e for e in typed_entries if "timeout_ms" in e]
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# @timeout_ms  (mirrors TIMEOUT_MS constexpr; used by call_service)")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    out.append("TIMEOUT_MS: dict[int, int] = {")
+    for e in timeout_entries:
+        name_upper = snake_case(e["name"]).upper()
+        out.append(f"    {name_upper}_ID: {e['timeout_ms']},")
+    out.append("}")
+    out.append("")
+
+    # --- schema version ---
+    version_entries = [e for e in typed_entries if "version" in e]
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# @version  (mirrors SCHEMA_VERSION constexpr)")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    out.append("SCHEMA_VERSION: dict[int, int] = {")
+    for e in version_entries:
+        name_upper = snake_case(e["name"]).upper()
+        out.append(f"    {name_upper}_ID: {e['version']},")
+    out.append("}")
+    out.append("")
+
+    # --- deprecated ---
+    deprecated_entries = [e for e in typed_entries if e.get("deprecated")]
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("# @deprecated  (informational)")
+    out.append("# ---------------------------------------------------------------------------")
+    out.append("")
+    out.append("DEPRECATED_COMMANDS: frozenset[int] = frozenset({")
+    for e in deprecated_entries:
+        name_upper = snake_case(e["name"]).upper()
+        out.append(f"    {name_upper}_ID,")
+    out.append("})")
+    out.append("")
+
+    with open(output_path, "w") as f:
+        f.write("\n".join(out))
+
+    print(f"[GEN] Python constants → {output_path}")
 
 
 # =============================================================================
@@ -1021,6 +1576,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument( "--input" , required = True )
     parser.add_argument( "--output", required = True )
+    parser.add_argument(
+        "--constants-out",
+        default = None,
+        help    = "Path to write generated_constants.py (default: auto-detect serial_comm_py/)"
+    )
 
     args = parser.parse_args()
 
@@ -1031,6 +1591,10 @@ def main():
         shutil.rmtree(output_dir)
     ensure_dir(output_dir)
 
+    # ENUMS first — must be registered in KNOWN_ENUMS before any struct/event
+    # that references them as field types
+    for path in sorted(input_dir.rglob("*.enum")):
+        process_enum(path, output_dir)
     # STRUCTS
     for path in input_dir.rglob("*.struct"):
         process_struct( path, output_dir)
@@ -1044,8 +1608,19 @@ def main():
     for path in input_dir.rglob("*.mission"):
         process_mission( path, output_dir )
 
-    # MANIFEST
+    # MANIFEST + Python __init__
     generate_manifest(output_dir)
+
+    # PYTHON CONSTANTS (generated_constants.py for serial_comm_py/)
+    if args.constants_out:
+        constants_path = Path(args.constants_out)
+    else:
+        # Auto-detect: look for serial_comm_py/ relative to input_dir's parent
+        candidate = input_dir.parent / "serial_comm_py" / "generated_constants.py"
+        constants_path = candidate if candidate.parent.exists() else None
+
+    if constants_path:
+        generate_python_constants(MANIFEST, constants_path)
 
     print("")
     print("[SerialComm] Generation completed")

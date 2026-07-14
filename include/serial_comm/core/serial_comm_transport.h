@@ -53,7 +53,8 @@ class ISerialCommTransport{
             size_t tx_buffer_size       = SerialCommConfig::UART_TX_BUFFER_SIZE;
             bool auto_interbyte_timeout = true;
             float interbyte_chars       = 3.5f;
-            uint32_t timeout_ms         = 10;
+            /* TX completion wait (UART: uart_wait_tx_done; ESP-NOW: send_cb ack) */
+            uint32_t timeout_ms         = 1000;
             bool half_duplex = false;
         };
         
@@ -95,12 +96,18 @@ class ISerialCommTransport{
          * @brief   Initialize the transport with the given configuration
          * @param   cfg The configuration parameters for the transport
          * @return  SerialCommResult::OK on success
-         * @return  SerialCommResult::ERR_FAIL if initialization fails 
+         * @return  SerialCommResult::ERR_FAIL if initialization fails
          *          for other reasons.
          */
         virtual errCode init(
             const Config& cfg
         ) = 0;
+
+        /**
+         * @brief   Initialize the transport with default configuration
+         * @return  SerialCommResult::OK on success
+         */
+        errCode init() { return init(Config{}); }
 
         /**
          * @brief   Start the transport, making it ready for communication

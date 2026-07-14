@@ -173,7 +173,7 @@ int MultiTransport::write(const uint8_t* data, size_t len) {
         return 0;
     }
 
-    int written = -1;
+    int min_written = -1;
 
     for (size_t i = 0; i < MAX_SLOTS; i++) {
         if (!slots_[i].used || !slots_[i].cfg.tx_enabled) {
@@ -181,13 +181,17 @@ int MultiTransport::write(const uint8_t* data, size_t len) {
         }
         int result = slots_[i].transport->write(data, len);
         if (result >= 0) {
-            written = result; /* at least one transport succeeded */
+            /* MULTI-02 fix: return min across all successful slots so the caller
+             * gets the worst-case byte count (conservative and correct). */
+            if (min_written < 0 || result < min_written) {
+                min_written = result;
+            }
         } else {
             ESP_LOGW(TAG, "write() failed on slot %zu", i);
         }
     }
 
-    return written;
+    return min_written;
 }
 
 

@@ -134,6 +134,12 @@ class SerialComm {
         errCode init( const Config& cfg );
 
         /**
+         * @brief Initialize middleware with default configuration
+         * @return Middleware result
+         */
+        errCode init() { return init(Config{}); }
+
+        /**
          * @brief Start middleware
          * @return Middleware result
          */
