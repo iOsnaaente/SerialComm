@@ -302,8 +302,11 @@ errCode MultiTransport::set_event_callback(event_callback_t cb, void* ctx) {
     event_callback_ = cb;
     event_ctx_      = ctx;
 
+    /* MULTI-01 fix: was filtering on rx_enabled — TX-only transport errors
+     * (e.g. ESP-NOW send failure, UART FIFO overflow on a write-only link)
+     * were silently dropped.  Events must be forwarded from every slot. */
     for (size_t i = 0; i < MAX_SLOTS; i++) {
-        if (slots_[i].used && slots_[i].cfg.rx_enabled) {
+        if (slots_[i].used) {
             slots_[i].transport->set_event_callback(sub_event_forwarder, this);
         }
     }
@@ -353,9 +356,12 @@ void MultiTransport::register_slot_callbacks(size_t idx) {
     Slot& s = slots_[idx];
     if (!s.used) return;
 
+    /* MULTI-01 fix: event forwarder must cover all slots, not just rx_enabled.
+     * A TX-only slot can still surface errors (send failure, FIFO overflow). */
+    s.transport->set_event_callback(sub_event_forwarder, this);
+
     if (s.cfg.rx_enabled) {
         s.transport->set_rx_callback(sub_rx_forwarder, this);
-        s.transport->set_event_callback(sub_event_forwarder, this);
     }
     if (s.cfg.tx_enabled) {
         s.transport->set_tx_done_callback(sub_tx_done_forwarder, this);

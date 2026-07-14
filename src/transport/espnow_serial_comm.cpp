@@ -34,7 +34,7 @@ ESPNowTransport::ESPNowTransport(const HardwareConfig& hw_cfg) :
     rx_ctx_(nullptr),
     tx_ctx_(nullptr),
     event_ctx_(nullptr),
-    state_mutex_(nullptr)
+    rx_done_sem_(nullptr)   /* ESPNOW-01/04: replaced unused state_mutex_ */
 {
     memset(&reassembly_, 0, sizeof(reassembly_));
     memset(peers_,       0, sizeof(peers_));
@@ -61,14 +61,27 @@ errCode ESPNowTransport::init(const Config& cfg) {
     /* ------------------------------------------------------------------
      * FreeRTOS objects
      * ------------------------------------------------------------------ */
+    /* ESPNOW-03 fix: reject a second init() call while another instance exists.
+     * Without this, the second instance overwrites instance_, silently
+     * hijacking all ESP-NOW callbacks from the first. */
+    if (instance_ != nullptr) {
+        ESP_LOGE(TAG, "Only one ESPNowTransport instance allowed at a time");
+        return errCode::ERR_ALREADY_INITIALIZED;
+    }
+
     tx_done_sem_ = xSemaphoreCreateBinary();
     if (!tx_done_sem_) {
         ESP_LOGE(TAG, "Failed to create TX semaphore");
         return errCode::ERR_NO_MEMORY;
     }
 
-    state_mutex_ = xSemaphoreCreateMutex();
-    if (!state_mutex_) {
+    /* ESPNOW-01 fix: rx_done_sem_ replaces the unused state_mutex_ (ESPNOW-04).
+     * Signals stop() that the RX task has exited cleanly before self-deleting,
+     * preventing vTaskDelete() from being called while the task holds
+     * reassembly_mutex_ (which would deadlock the next init()). */
+    rx_done_sem_ = xSemaphoreCreateBinary();
+    if (!rx_done_sem_) {
+        ESP_LOGE(TAG, "Failed to create rx_done semaphore");
         cleanup_resources();
         return errCode::ERR_NO_MEMORY;
     }
@@ -175,6 +188,9 @@ errCode ESPNowTransport::start() {
         return errCode::ERR_INVALID_STATE;
     }
 
+    /* Reset semaphore in case of restart after stop() */
+    xSemaphoreTake(rx_done_sem_, 0);
+
     /* Start reassembly / dispatch task */
     BaseType_t task_result;
 
@@ -220,13 +236,20 @@ errCode ESPNowTransport::stop() {
         return errCode::ERR_INVALID_STATE;
     }
 
-    /* Delete the RX task */
-    if (rx_task_) {
-        vTaskDelete(rx_task_);
-        rx_task_ = nullptr;
-    }
-
+    /* ESPNOW-01 fix: signal the RX task to exit its queue-receive loop,
+     * then wait for it to release reassembly_mutex_ and self-delete.
+     * The old pattern (vTaskDelete while task may hold the mutex) could
+     * deadlock the next init() because reassembly_mutex_ would never be Given. */
     state_ = State::STOPPED;
+
+    if (xSemaphoreTake(rx_done_sem_, pdMS_TO_TICKS(500)) == pdFALSE) {
+        /* Task is stuck — force-delete as safety net */
+        ESP_LOGW(TAG, "RX task did not exit in 500 ms — force deleting");
+        if (rx_task_) {
+            vTaskDelete(rx_task_);
+        }
+    }
+    rx_task_ = nullptr;
 
     if (event_callback_) {
         event_callback_(event_ctx_, Event::DISCONNECTED);
@@ -353,12 +376,17 @@ errCode ESPNowTransport::write_async(const uint8_t* data, size_t len) {
             return err;
         }
 
-        /*
-         * Even in async mode we must wait briefly for the send-done callback
-         * before queuing the next fragment: esp_now_send() rejects a second
-         * call while the first one is still outstanding.
-         */
-        xSemaphoreTake(tx_done_sem_, pdMS_TO_TICKS(100));
+        /* Even in async mode we must wait for the send-done callback before
+         * queuing the next fragment: esp_now_send() rejects a second call
+         * while the previous one is still outstanding (ESP_ERR_ESPNOW_NO_MEM).
+         * ESPNOW-02 fix: was ignoring the return value — if the 100ms window
+         * elapsed (congested Wi-Fi), the next esp_now_send() would fail and
+         * the message would be silently truncated. Now we abort explicitly. */
+        if (xSemaphoreTake(tx_done_sem_, pdMS_TO_TICKS(100)) != pdTRUE) {
+            ESP_LOGW(TAG, "write_async: TX timeout on fragment %u/%u — aborting",
+                     frag_idx + 1, frag_total);
+            return errCode::ERR_TIMEOUT;
+        }
 
         offset += chunk;
     }
@@ -607,11 +635,18 @@ void ESPNowTransport::rx_task_entry(void* args) {
     auto* self = static_cast<ESPNowTransport*>(args);
     RxQueueItem item;
 
-    while (true) {
-        if (xQueueReceive(self->rx_queue_, &item, portMAX_DELAY) == pdTRUE) {
+    /* ESPNOW-01 fix: replaced infinite loop + portMAX_DELAY with a state-
+     * aware loop and 50ms timeout.  The task now exits cleanly when stop()
+     * sets state_ = STOPPED, instead of being killed mid-mutex by vTaskDelete. */
+    while (self->state_ == State::RUNNING) {
+        if (xQueueReceive(self->rx_queue_, &item, pdMS_TO_TICKS(50)) == pdTRUE) {
             self->process_rx_item(item);
         }
     }
+
+    /* Signal stop() that it is now safe to return (mutex is not held) */
+    xSemaphoreGive(self->rx_done_sem_);
+    vTaskDelete(nullptr);
 }
 
 
@@ -802,8 +837,10 @@ void ESPNowTransport::cleanup_resources() {
         vSemaphoreDelete(reassembly_mutex_);
         reassembly_mutex_ = nullptr;
     }
-    if (state_mutex_) {
-        vSemaphoreDelete(state_mutex_);
-        state_mutex_ = nullptr;
+    /* ESPNOW-04 fix: state_mutex_ was declared but never used (88 bytes wasted).
+     * Replaced by rx_done_sem_ (ESPNOW-01) which is functional. */
+    if (rx_done_sem_) {
+        vSemaphoreDelete(rx_done_sem_);
+        rx_done_sem_ = nullptr;
     }
 }

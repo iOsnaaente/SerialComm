@@ -240,4 +240,58 @@ namespace SerialCommConfig {
         false;
     #endif
 
+
+    // -----------------------------------------------------------------------
+    // UDP TRANSPORT
+    // -----------------------------------------------------------------------
+
+    constexpr uint16_t UDP_LOCAL_PORT =
+        #ifdef CONFIG_SERIAL_COMM_UDP_LOCAL_PORT
+            CONFIG_SERIAL_COMM_UDP_LOCAL_PORT;
+        #else
+            4210;
+        #endif
+
+    constexpr uint16_t UDP_REMOTE_PORT =
+        #ifdef CONFIG_SERIAL_COMM_UDP_REMOTE_PORT
+            CONFIG_SERIAL_COMM_UDP_REMOTE_PORT;
+        #else
+            4210;
+        #endif
+
+    constexpr size_t UDP_RX_BUFFER_SIZE =
+        #ifdef CONFIG_SERIAL_COMM_UDP_RX_BUFFER_SIZE
+            CONFIG_SERIAL_COMM_UDP_RX_BUFFER_SIZE;
+        #else
+            4096;
+        #endif
+
+    constexpr size_t UDP_TASK_STACK_SIZE =
+        #ifdef CONFIG_SERIAL_COMM_UDP_TASK_STACK_SIZE
+            CONFIG_SERIAL_COMM_UDP_TASK_STACK_SIZE;
+        #else
+            4096;
+        #endif
+
+    constexpr uint32_t UDP_TASK_PRIORITY =
+        #ifdef CONFIG_SERIAL_COMM_UDP_TASK_PRIORITY
+            CONFIG_SERIAL_COMM_UDP_TASK_PRIORITY;
+        #else
+            5;
+        #endif
+
+    constexpr int UDP_TASK_CORE =
+        #ifdef CONFIG_SERIAL_COMM_UDP_TASK_CORE
+            CONFIG_SERIAL_COMM_UDP_TASK_CORE;
+        #else
+            -1;
+        #endif
+
+    constexpr bool UDP_USE_TASK_CORE_AFFINITY =
+    #if defined(CONFIG_SERIAL_COMM_UDP_TASK_CORE) && CONFIG_SERIAL_COMM_UDP_TASK_CORE >= 0
+        true;
+    #else
+        false;
+    #endif
+
 }
