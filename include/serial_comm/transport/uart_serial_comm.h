@@ -45,8 +45,6 @@ class UARTTransport final : public ISerialCommTransport {
     private:
         HardwareConfig hw_cfg_;
 
-        SemaphoreHandle_t uart_mutex_;
-        SemaphoreHandle_t state_mutex_;
         QueueHandle_t uart_queue_;
         TaskHandle_t uart_task_;
 

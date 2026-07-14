@@ -260,4 +260,56 @@ menu "SerialComm Middleware"
 
     endmenu
 
+
+    menu "UDP Transport"
+
+        config SERIAL_COMM_UDP_LOCAL_PORT
+            int "UDP Local Port (bind)"
+            range 1024 65535
+            default 4210
+            help
+                UDP port the ESP32 binds to for receiving packets.
+                Both endpoints (ESP32 and PC) must agree on this port.
+
+        config SERIAL_COMM_UDP_REMOTE_PORT
+            int "UDP Remote Port (TX destination)"
+            range 1024 65535
+            default 4210
+            help
+                UDP port used as the default TX destination.
+                Can be overridden at runtime with set_remote_endpoint().
+
+        config SERIAL_COMM_UDP_RX_BUFFER_SIZE
+            int "UDP RX StreamBuffer Size (bytes)"
+            range 512 16384
+            default 4096
+            help
+                Size of the StreamBuffer used to store received UDP datagrams
+                for polled read() / available() access.  Increase if large
+                bursts of packets arrive before the application reads them.
+
+        config SERIAL_COMM_UDP_TASK_STACK_SIZE
+            int "UDP RX Task Stack Size (bytes)"
+            range 2048 16384
+            default 4096
+            help
+                Stack size for the UDP receive-and-dispatch FreeRTOS task.
+
+        config SERIAL_COMM_UDP_TASK_PRIORITY
+            int "UDP RX Task Priority"
+            range 1 10
+            default 5
+            help
+                FreeRTOS priority for the UDP RX task.
+
+        config SERIAL_COMM_UDP_TASK_CORE
+            int "UDP RX Task Core"
+            range -1 1
+            default -1
+            help
+                CPU core affinity for the UDP RX task.
+                Set to -1 to let the FreeRTOS scheduler decide.
+
+    endmenu
+
 endmenu

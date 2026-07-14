@@ -54,6 +54,7 @@ idf_component_register(
                 "src/transport/uart_serial_comm.cpp"
                 "src/transport/espnow_serial_comm.cpp"
                 "src/transport/multi_transport.cpp"
+                "src/transport/udp_serial_comm.cpp"
 
         INCLUDE_DIRS
                 "include"
@@ -65,6 +66,8 @@ idf_component_register(
                 driver
                 log
                 esp_wifi
+                lwip
+                esp_netif
 )
 
 

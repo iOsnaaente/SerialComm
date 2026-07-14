@@ -215,7 +215,13 @@ class ESPNowTransport final : public ISerialCommTransport {
         void*                tx_ctx_;
         void*                event_ctx_;
 
-        SemaphoreHandle_t    state_mutex_;
+        /**
+         * @brief Semaphore signalled by the RX task just before self-delete.
+         *        stop() waits on this to confirm the task exited cleanly,
+         *        preventing vTaskDelete() on a task that holds reassembly_mutex_.
+         *        (ESPNOW-01 fix — replaces the unused state_mutex_)
+         */
+        SemaphoreHandle_t    rx_done_sem_;
 
         /**
          * @brief Global singleton pointer required because ESP-NOW callbacks

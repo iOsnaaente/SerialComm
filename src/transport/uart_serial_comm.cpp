@@ -15,8 +15,6 @@ static const char* TAG = "UART_TRANSPORT";
 
 UARTTransport::UARTTransport( const HardwareConfig& hw_cfg ) :   
     hw_cfg_(hw_cfg),
-    uart_mutex_(nullptr),
-    state_mutex_(nullptr),
     uart_queue_(nullptr),
     uart_task_(nullptr),
     tx_done_callback_(nullptr),
@@ -187,7 +185,7 @@ errCode UARTTransport::write_async( const uint8_t* data, size_t len ) {
     if ( state_ != State::RUNNING ) {
         return errCode::ERR_INVALID_STATE;
     }
-    
+
     if (cfg_.half_duplex && hw_cfg_.de_pin >= 0) {
         gpio_set_level((gpio_num_t)hw_cfg_.de_pin, 1);
     }
@@ -198,6 +196,18 @@ errCode UARTTransport::write_async( const uint8_t* data, size_t len ) {
             data,
             len
         );
+
+    /* UART-02 fix: was missing — DE pin was raised but never lowered.
+     * In half-duplex RS-485, the transceiver stayed permanently in TX mode,
+     * making the device deaf to any incoming bytes.
+     * Must wait for hardware drain before releasing the bus back to RX. */
+    if (cfg_.half_duplex && hw_cfg_.de_pin >= 0) {
+        uart_wait_tx_done(
+            (uart_port_t)hw_cfg_.uart_port,
+            pdMS_TO_TICKS(cfg_.timeout_ms)
+        );
+        gpio_set_level((gpio_num_t)hw_cfg_.de_pin, 0);
+    }
 
     if (written < 0) {
         return errCode::ERR_IO;
@@ -289,7 +299,9 @@ void UARTTransport::uart_event_task( void* args ) {
     auto* self =
         static_cast<UARTTransport*>(args);
     uart_event_t event;
-    uint8_t rx_buffer[256];
+    /* UART-01 fix: was [256] — truncated any packet > 256 bytes.
+     * SerialComm max packet = MAX_PAYLOAD_SIZE + 11 (header) + 2 (CRC). */
+    uint8_t rx_buffer[SerialCommConfig::MAX_PAYLOAD_SIZE + 16];
     while (true) {
         if ( xQueueReceive( self->uart_queue_, &event, portMAX_DELAY ) ){
             switch (event.type) {
